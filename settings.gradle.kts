@@ -18,7 +18,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CloudStream-macOS"
+rootProject.name = "cloudstream-hless"
 
 // Kotlin/JVM 17 only.
 include(":library") // extension API: MainAPI, extractors, network stack
