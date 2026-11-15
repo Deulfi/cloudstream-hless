@@ -150,3 +150,19 @@ tests, and pushes.
   workflow builds a new image.
 - A forced conflict (edit an upstream file on a test branch) produces the
   issue and no push.
+
+## Findings
+
+- The first real sync (fork point `79293df` to upstream `7ee0434`) merged
+  cleanly; upstream had not modified `engine/build.gradle.kts`. The `ci`
+  build step caught a broken placement inherited from the 2a-2g commit:
+  the ktor test-host dependency lines sat outside `dependencies {}`. Fixed
+  by moving them into the block; the fix is part of the 2a-2g commit
+  (`170f0c8`).
+- Idempotence verified locally: a second run prints "up to date" and exits
+  0.
+- Forced conflict verified locally against a fake upstream: the script
+  prints the conflicting path, aborts the merge, and exits 2 without
+  pushing.
+- Remaining: push to `origin` and the first `workflow_dispatch` run on
+  GitHub; the issue-creation step is only exercised there.

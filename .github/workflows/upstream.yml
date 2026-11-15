@@ -1,0 +1,72 @@
+name: upstream-sync
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sync:
+    name: Merge upstream
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6 (pinned third-party action)
+      - name: Run upstream sync
+        id: sync
+        run: |
+          before="$(git rev-parse HEAD)"
+          set +e
+          bash scripts/upstream_sync.sh > sync.log 2>&1
+          status=$?
+          set -e
+          cat sync.log
+          after="$(git rev-parse HEAD)"
+          {
+            echo "status=${status}"
+            if [ "${before}" != "${after}" ]; then echo "changed=true"; else echo "changed=false"; fi
+          } >> "$GITHUB_OUTPUT"
+      # A push made with the workflow's own token does not start other
+      # workflows, so the image rebuild must be triggered explicitly.
+      - name: Build and push
+        id: build
+        if: steps.sync.outputs.status == '0' && steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./gradlew :engine:test :engine:jar --console=plain > build.log 2>&1 || { cat build.log; exit 1; }
+          git push origin HEAD:main
+          gh workflow run ci.yml --ref main
+      - name: Open issue on conflict
+        if: steps.sync.outputs.status == '2' || (steps.sync.outputs.status == '0' && steps.build.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open="$(gh issue list --search 'in:title:"Upstream merge needs attention" is:open' --json number | wc -l)"
+          if [ "${open}" -gt 0 ]; then
+            echo "An open issue with that title already exists; not duplicating it."
+          else
+            log=sync.log
+            [ -f build.log ] && log=build.log
+            gh issue create --title "Upstream merge needs attention" --body-file "${log}"
+          fi
+          exit 1

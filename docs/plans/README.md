@@ -20,7 +20,7 @@ the others, except this page. [../PLAN.md](../PLAN.md) is the overview.
 | 3c | [3c-compat-report.md](3c-compat-report.md) | 1 | done |
 | 3d | [3d-anime-kitsu.md](3d-anime-kitsu.md) | 2e, 2f | optional |
 | 3e | [3e-webview-extractors.md](3e-webview-extractors.md) | 2e | optional; check its step 0 first |
-| 4a | [4a-upstream-sync.md](4a-upstream-sync.md) | nothing | not started |
+| 4a | [4a-upstream-sync.md](4a-upstream-sync.md) | nothing | done, except the first workflow run on GitHub |
 
 2b, 2c and 2d do not depend on each other. 2f changes parts of 2d, so build
 them together or one right after the other. When you finish a plan, change
@@ -80,4 +80,5 @@ The jar is `engine/build/libs/daemon.jar`. How to run it is in
 
 ## Local changes to upstream files
 
-None.
+- `engine/build.gradle.kts`: test dependencies for the addon server route
+  tests (2b).
