@@ -69,13 +69,14 @@ jobs:
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
           docker build -t hless:ci .
       - name: Runtime has the modules the engine needs
-        run: docker run --rm --entrypoint java hless:ci --list-modules | grep -q '^jdk.incubator.foreign'
+        run: docker run --rm --entrypoint java hless:ci --list-modules | grep '^jdk.incubator.foreign' # no -q: an early exit breaks the pipe under pipefail
       # The engine alone, as in docs/plans/1-container.md: proves the image starts.
       - name: Engine starts inside the image
         run: |
           docker run -d --name smoke --network host hless:ci com.lagradost.macos.MainKt 17171 ci-smoke-token-0123456789
           for i in $(seq 1 60); do
-            if curl -fsS -m 2 http://127.0.0.1:17171/health | grep -q '"phase":"ready"'; then echo "engine ready"; exit 0; fi
+            health="$(curl -fsS -m 2 http://127.0.0.1:17171/health || true)"
+            if [[ "$health" == *'"phase":"ready"'* ]]; then echo "engine ready"; exit 0; fi
             sleep 1
           done
           docker logs smoke; exit 1

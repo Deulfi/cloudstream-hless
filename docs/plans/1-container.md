@@ -152,5 +152,5 @@ maintainer agrees.
   times and kills it after 20–250 ms; that assertion only says the child
   never finished a write before being killed. Every consistency assertion
   inside the loop passed. Most likely the container was too slow (it was
-  swapping), not a Linux defect, but that is not proven: see whether it
-  passes on the GitHub runner before deciding anything.
+  swapping), not a Linux defect. Confirmed the same day: the whole suite,
+  this test included, passed on the GitHub runner. Nothing to do.
