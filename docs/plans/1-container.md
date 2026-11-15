@@ -9,7 +9,7 @@ Read [README.md](README.md) first.
 | Build `daemon.jar` on Linux | **done**, verified 2026-11-15 |
 | Run the engine alone, API answers | **done**, verified 2026-11-15 |
 | An extension loads in-process on Linux | **done** with the repo's test extension |
-| A real extension searches and resolves links | open: needs a repository URL from the maintainer |
+| Real extensions search and resolve links | **done**, verified 2026-11-15 (see Findings) |
 | Engine test suite on Linux | **done**: 490 run, 474 passed, 15 skipped, 1 failed (see Findings) |
 | Image built by CI and pushed to GHCR | in the repository (A below) |
 | LXC created from the image on Proxmox | open (A below), maintainer |
@@ -21,7 +21,9 @@ Measured on Debian 13, Temurin JDK 17.0.21, 2 cores, 1 GB RAM.
 - `./gradlew :engine:jar` succeeds unchanged. It took 8.5 minutes with Gradle
   capped at 640 MB heap; give a build machine 2 GB or more.
 - The engine starts in about 2 seconds and uses about 80 MB resident memory
-  idle, about 100 MB with one extension loaded.
+  idle, about 165 MB with 25 extensions installed and about 240 MB after
+  all of them had been searched (heap capped at 192 MB). Give the container
+  512 MB.
 - With no launch options it runs extensions in-process
   (`"isolation":{"mode":"in-process"}` in `/health`).
 - It binds `127.0.0.1` only, answers 401 without the token and 403 when the
@@ -154,3 +156,22 @@ maintainer agrees.
   inside the loop passed. Most likely the container was too slow (it was
   swapping), not a Linux defect. Confirmed the same day: the whole suite,
   this test included, passed on the GitHub runner. Nothing to do.
+- 2026-11-15, real community repository with 25 extensions (28 providers),
+  run with `scripts/compat_report.py --query Matrix`:
+  - all 25 installed and reached state `running`; none reported a missing
+    Android class or an unsupported feature;
+  - 12 providers found the title and opened it, 9 returned playable links
+    (HLS and plain video; every link carried request headers, so MediaFlow or
+    `proxyHeaders` is needed for all of them);
+  - 3 opened the title but returned `provider_no_data` for links;
+  - 5 failed in search with transport errors (`tls_failure`,
+    `network_failure`): sites blocked or gone from this network, not engine
+    defects;
+  - 2 did not answer a search within 30 seconds, and the engine logged
+    `solve.unavailable` once: probably a Cloudflare challenge with no solver
+    attached (plan 3a). Not confirmed;
+  - the rest returned no result for that query, which for news and live-TV
+    providers is expected.
+- `GET /search` answers `200 []` for a provider whose search failed; the
+  failure is only in the engine log. An empty search result therefore does
+  not prove the provider lacks the title (matters for the cache in plan 2d).

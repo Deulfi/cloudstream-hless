@@ -49,6 +49,11 @@ operation failures". The most telling ones:
 | `dns_failure`, `connection_reset` | The site is blocked or gone from this network |
 | `provider_no_data` | The site changed; the extension's author has to fix it |
 
+## State
+
+Done 2026-11-15: `scripts/compat_report.py` exists and was run on the test
+container. Results are in [1-container.md](1-container.md) under Findings.
+
 ## Done when
 
 Running it on the test container produces the table for the installed

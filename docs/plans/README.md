@@ -7,7 +7,7 @@ the others, except this page. [../PLAN.md](../PLAN.md) is the overview.
 
 | # | Plan | Needs | State |
 | :--- | :--- | :--- | :--- |
-| 1 | [1-container.md](1-container.md) | nothing | see the file |
+| 1 | [1-container.md](1-container.md) | nothing | done, except creating the LXC on Proxmox |
 | 2a | [2a-launcher-and-engine-client.md](2a-launcher-and-engine-client.md) | 1 | not started |
 | 2b | [2b-bootstrap-repos.md](2b-bootstrap-repos.md) | 2a | not started |
 | 2c | [2c-addon-server.md](2c-addon-server.md) | 2a | not started |
@@ -15,7 +15,7 @@ the others, except this page. [../PLAN.md](../PLAN.md) is the overview.
 | 2e | [2e-streams.md](2e-streams.md) | 2a, 2c, 2d | not started |
 | 3a | [3a-cloudflare-solver.md](3a-cloudflare-solver.md) | 2e | optional |
 | 3b | [3b-catalogs.md](3b-catalogs.md) | 2e | optional |
-| 3c | [3c-compat-report.md](3c-compat-report.md) | 1 | optional |
+| 3c | [3c-compat-report.md](3c-compat-report.md) | 1 | done |
 
 2b, 2c and 2d do not depend on each other. When you finish a plan, change its
 state here to `done` in the same commit.

@@ -101,7 +101,10 @@ the search.
   `cs.cloudstream.home`.
 - Key: `"<imdb>|<providerId>"`. Value: `{"url": String?, "at": epochMillis}`.
   `url == null` records "this provider does not have it".
-- A hit expires after 30 days, a miss after 24 hours.
+- A hit expires after 30 days, a miss after 1 hour. The short time for
+  misses is deliberate: the engine answers `200 []` both when a provider
+  does not have the title and when its search failed (site down, blocked,
+  challenged), and the two cannot be told apart.
 - Load once at start (missing or corrupt file means empty). Save at most once
   every 30 seconds and on shutdown: write to `matches.json.tmp`, then move
   over the real file with `StandardCopyOption.ATOMIC_MOVE`.

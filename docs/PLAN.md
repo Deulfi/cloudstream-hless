@@ -37,8 +37,9 @@ Verified on Linux (Debian 13, JDK 17) on 2026-11-15; details in
   the request and waits for cookies (`/solve/pending`, `/solve-callback`).
 - Repositories re-sync by themselves every 6 hours.
 
-Not verified yet: a real community extension searching and resolving links on
-Linux. That needs a repository URL.
+Real community extensions were checked the same day: 25 of 25 installed and
+started, and 9 of 28 providers returned playable links for one test query;
+the failures were blocked or unreachable sites, not missing Android support.
 
 ## Phases
 
