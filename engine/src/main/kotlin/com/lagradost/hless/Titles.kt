@@ -1,0 +1,64 @@
+package com.lagradost.hless
+
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import java.util.concurrent.TimeUnit
+
+/** The names of a title, most useful first, and its year. */
+data class TitleInfo(val names: List<String>, val year: Int?)
+
+/** Name lookup for one (type, imdb) pair. */
+interface TitleLookup {
+    suspend fun lookup(type: String, imdb: String): TitleInfo?
+}
+
+/**
+ * TMDB (2f) with the Cinemeta fallback (2d), backed by a 30-day disk cache
+ * keyed by type, imdb and the language list.
+ */
+class TitleSource(
+    private val store: JsonFileStore = HlessStores.titleStore,
+    private val tmdbKey: String? = Config.tmdbKey,
+    private val langs: List<String> = Config.langs,
+    private val tmdb: suspend (String, String, String, List<String>) -> TitleInfo? = Tmdb::lookup,
+    private val cinemeta: suspend (String, String) -> TitleInfo? = Cinemeta::lookup,
+) : TitleLookup {
+
+    override suspend fun lookup(type: String, imdb: String): TitleInfo? {
+        val key = "$type|$imdb|${langs.joinToString(",")}"
+        val cached = store.get(key)?.let { entry ->
+        val at = (entry as? JsonObject)?.get("at")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+            if (System.currentTimeMillis() - at < TTL) decode(entry) else null
+        }
+        if (cached != null) return cached
+        val info = if (tmdbKey != null && !Tmdb.isRejected()) {
+            tmdb(type, imdb, tmdbKey, langs)
+        } else null
+        val resolved = info ?: cinemeta(type, imdb) ?: return null
+        store.put(key, encode(resolved))
+        return resolved
+    }
+
+    private fun encode(info: TitleInfo): JsonObject = buildJsonObject {
+        put("names", JsonArray(info.names.map { JsonPrimitive(it) }))
+        put("year", info.year?.let { JsonPrimitive(it) } ?: JsonNull)
+    }
+
+    private fun decode(entry: JsonElement): TitleInfo? {
+        val value = (entry as? JsonObject)?.get("value") as? JsonObject ?: return null
+        val names = value.get("names")?.jsonArray?.map { it.jsonPrimitive.content } ?: return null
+        val year = value.get("year")?.jsonPrimitive?.content?.toIntOrNull()
+        return TitleInfo(names, year)
+    }
+
+    companion object {
+        private val TTL = TimeUnit.DAYS.toMillis(30)
+    }
+}

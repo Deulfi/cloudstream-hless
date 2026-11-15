@@ -85,6 +85,8 @@ dependencies {
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
+    // In-process route tests for the addon server (no network).
+    testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
 }
 
 application {
