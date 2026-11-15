@@ -27,7 +27,7 @@ service (FlareSolverr or Byparr) running as another container.
 
 | Variable | Default | Meaning |
 | :--- | :--- | :--- |
-| `HLESS_SOLVER_URL` | none | e.g. `http://flaresolverr:8191`. Unset disables the loop |
+| `HLESS_SOLVER_URL` | none | Base URL of the solver as reachable from this container, e.g. `http://10.0.0.5:8191`. Unset disables the loop |
 | `HLESS_SOLVER_TIMEOUT_MS` | `60000` | `maxTimeout` sent to the solver |
 
 ## Files
@@ -45,31 +45,42 @@ Started from `HlessMain` after the engine is ready, only when
 2. For each task not already in progress (keep a set of `taskId`), launch a
    coroutine, at most 2 at a time:
    1. `POST <solver>/v1` with JSON
-      `{"cmd":"request.get","url":<targetUrl>,"maxTimeout":<timeout>}`.
+      `{"cmd":"request.get","url":<targetUrl>,"maxTimeout":<timeout>,"userAgent":<task.userAgent>}`
+      (see "User-Agent" below).
    2. On `status == "ok"`: join `solution.cookies` as
       `name=value; name=value` and call `completeSolve`.
    3. Otherwise log the solver's `message` and do nothing; the engine's task
       expires by itself.
    4. Remove the `taskId` from the set.
 
-## The open problem: User-Agent
+## User-Agent
 
-The solver answers with its own browser's User-Agent in
-`solution.userAgent`. The engine retries with the **original** request's
-User-Agent (`task.userAgent`). If they differ, Cloudflare rejects the cookie.
-Current FlareSolverr versions ignore a requested User-Agent.
+Cloudflare rejects a clearance cookie presented with a different User-Agent
+than the one that earned it. The engine retries with the **original**
+request's User-Agent (`task.userAgent`), so the solver has to use that one.
 
-Work through these in order and stop at the first that works:
+The maintainer's solver is Solverr 1.8.0 (FlareSolverr-compatible `/v1`,
+Camoufox Firefox). Checked on 2026-11-15: it accepts a `userAgent` field in
+the request and reports it back in `solution.userAgent`. So always send it:
 
-1. Try it as is against one challenged provider. Some sites do not check.
-2. See whether the solver in use accepts a User-Agent per request (Byparr and
-   forks differ; read its README). If so, send `task.userAgent`.
-3. Make the engine use the solver's User-Agent for that origin on the retry.
-   This needs a change in `engine/.../macos/SolveInterceptor.kt`, an upstream
-   file. Keep it to the smallest possible diff: an optional field
-   `userAgent` on `SolveCallbackRequestDto`, carried to the retry request.
-   Record the change in `docs/plans/README.md` under "Local changes to
-   upstream files".
+```json
+{"cmd":"request.get","url":"<targetUrl>","maxTimeout":60000,"userAgent":"<task.userAgent>"}
+```
+
+Omit the field when `task.userAgent` is null. After each solve, compare
+`solution.userAgent` with what was sent and log a warning if they differ.
+
+Not checked: whether a real Cloudflare challenge passes when a Firefox-based
+solver presents a non-Firefox User-Agent. If solves succeed but the engine's
+retry is still challenged, the fallback is to make the engine use the
+solver's own User-Agent for that origin on the retry. That needs a change in
+`engine/.../macos/SolveInterceptor.kt`, an upstream file: keep it to the
+smallest possible diff (an optional `userAgent` on
+`SolveCallbackRequestDto`, carried to the retry) and record it in
+`docs/plans/README.md` under "Local changes to upstream files".
+
+Stock FlareSolverr ignores a requested User-Agent; with it, only the
+fallback works.
 
 ## Also required
 

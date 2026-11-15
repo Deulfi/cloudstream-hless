@@ -47,3 +47,43 @@ jobs:
           path: |
             engine/build/libs/daemon.jar
             engine/build/sbom/
+
+  # Independent of the test job: a failing upstream test must not block the image.
+  image:
+    name: Container image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6 (pinned third-party action)
+      - name: Build fat jar
+        run: ./gradlew :engine:jar --console=plain
+      - name: Build image
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          docker build -t hless:ci .
+      - name: Runtime has the modules the engine needs
+        run: docker run --rm --entrypoint java hless:ci --list-modules | grep -q '^jdk.incubator.foreign'
+      # The engine alone, as in docs/plans/1-container.md: proves the image starts.
+      - name: Engine starts inside the image
+        run: |
+          docker run -d --name smoke --network host hless:ci com.lagradost.macos.MainKt 17171 ci-smoke-token-0123456789
+          for i in $(seq 1 60); do
+            if curl -fsS -m 2 http://127.0.0.1:17171/health | grep -q '"phase":"ready"'; then echo "engine ready"; exit 0; fi
+            sleep 1
+          done
+          docker logs smoke; exit 1
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag hless:ci "$IMAGE:latest"
+          docker tag hless:ci "$IMAGE:${GITHUB_SHA::12}"
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:${GITHUB_SHA::12}"

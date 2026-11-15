@@ -119,6 +119,29 @@ Example result:
 https://mediaflow.example.org/proxy/hls/manifest.m3u8?d=https%3A%2F%2Fcdn.example%2Fa.m3u8&api_password=secret&h_referer=https%3A%2F%2Fsite.example%2F
 ```
 
+### Which MediaFlow address
+
+`HLESS_MEDIAFLOW_URL` ends up inside the URLs that Stremio plays, so it must
+be the address the **player** can reach (normally the name served by the
+reverse proxy), not an internal container address.
+
+### Wake-up
+
+The maintainer's MediaFlow is stopped when idle and started by the reverse
+proxy on the first request: the proxy answers `202` while it starts and the
+real answer afterwards. A player that gets the `202` page instead of a
+playlist fails. So, when MediaFlow is configured:
+
+- At the start of every `streams(type, id)` call, launch `MediaFlow.wake()`
+  in `scope`. Do not wait for it.
+- `wake()`: `GET <HLESS_MEDIAFLOW_URL>/health`, timeout 5 s; if the status is
+  not 200, repeat every second, at most 30 times. Ignore all errors. Skip if
+  a wake succeeded less than 60 seconds ago or one is already running.
+
+By the time the user has picked a stream, MediaFlow is up. Observed on the
+maintainer's setup on 2026-11-15: `202` on the first request, then `200 OK`
+on `/health`.
+
 Known limits, leave as they are:
 
 - The password is visible in the URL Stremio receives. MediaFlow has

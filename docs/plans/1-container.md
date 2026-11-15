@@ -11,8 +11,8 @@ Read [README.md](README.md) first.
 | An extension loads in-process on Linux | **done** with the repo's test extension |
 | A real extension searches and resolves links | open: needs a repository URL from the maintainer |
 | Engine test suite on Linux | **done**: 490 run, 474 passed, 15 skipped, 1 failed (see Findings) |
-| Dockerfile and compose file | open (A below) |
-| Service without Docker | open (B below), alternative to A |
+| Image built by CI and pushed to GHCR | in the repository (A below) |
+| LXC created from the image on Proxmox | open (A below), maintainer |
 
 ## Verified facts
 
@@ -96,103 +96,46 @@ Expected: `/plugins` lists extensions with `"state":"running"`. Extensions in
 state `failed` carry the reason in `lastError`; write those down, do not fix
 them here.
 
-## A. Dockerfile and compose (open)
+## A. Image from CI, installed as an OCI LXC
 
-Create `Dockerfile` in the repository root:
+Decided 2026-11-15: GitHub Actions builds the image and pushes it to GHCR;
+Proxmox runs it as an LXC created from that OCI image. No Docker on the host,
+no compose file.
 
-```dockerfile
-FROM eclipse-temurin:17-jdk AS build
-WORKDIR /src
-COPY . .
-RUN ./gradlew :engine:jar --console=plain --no-daemon
+Already in the repository:
 
-FROM eclipse-temurin:17-jre
-RUN useradd --system --uid 10001 --home /data hless && mkdir /data && chown hless /data
-COPY --from=build /src/engine/build/libs/daemon.jar /app/daemon.jar
-USER hless
-VOLUME /data
-EXPOSE 7000
-ENTRYPOINT ["java", "--add-modules=jdk.incubator.foreign", "--enable-native-access=ALL-UNNAMED", \
-  "-XX:TieredStopAtLevel=1", "-Xms16m", "-Xmx192m", "-XX:MaxDirectMemorySize=64m", \
-  "-XX:+UseSerialGC", "-XX:+ExitOnOutOfMemoryError", "-Dcs.cloudstream.home=/data", \
-  "-cp", "/app/daemon.jar", "com.lagradost.hless.HlessMainKt"]
-```
+- `Dockerfile`: runtime only. It copies `engine/build/libs/daemon.jar`, which
+  must be built first (`./gradlew :engine:jar`). It runs as root on purpose:
+  an unprivileged LXC already maps root to an unprivileged host user, and a
+  second user only complicates the `/data` mount.
+- `.github/workflows/ci.yml`, job `image`: builds the jar and the image,
+  checks the runtime has `jdk.incubator.foreign`, starts the engine inside
+  the image and waits for `/health` to report `ready`, then pushes
+  `ghcr.io/<owner>/<repo>:latest` and `:<commit>` on pushes to `main`.
 
-Checks to make, in order:
+The image's default command is `com.lagradost.hless.HlessMainKt` (plan 2a).
+Until 2a is merged the image only runs with the command overridden to
+`com.lagradost.macos.MainKt <port> <token>`, which is what CI does.
 
-1. `docker run --rm eclipse-temurin:17-jre java --list-modules | grep jdk.incubator.foreign`
-   must print a line. If it prints nothing, use `eclipse-temurin:17-jdk` for
-   the second stage too.
-2. Add a `.dockerignore` with `.git`, `.gradle`, `**/build`, `docs`.
-3. Until 2a exists, test the image with the entrypoint from "Run the engine
-   alone" instead (`-jar /app/daemon.jar 17171 <token>`).
+Open steps, for the maintainer on Proxmox (not verified here):
 
-Create `docker-compose.yml`:
+1. GHCR packages of a private repository are private. Either set the package
+   to public in its GitHub settings, or pull with a token that has
+   `read:packages`. Check whether your Proxmox version's "pull from OCI
+   registry" dialog accepts credentials; if not, make the package public or
+   pull with `skopeo` into the template storage.
+2. Create the LXC from the image. Unprivileged, 1 core, 512 MB RAM.
+3. Add a mount point at `/data` (1 GB is plenty). It must survive
+   re-creating the container from a newer image.
+4. Set the `HLESS_*` environment variables in the container's options
+   (tables in [2a](2a-launcher-and-engine-client.md) and
+   [3a](3a-cloudflare-solver.md)).
+5. Point Traefik at port 7000 of the container.
+6. Updating: pull the new image and re-create the container with the same
+   mount point and environment.
 
-```yaml
-services:
-  hless:
-    build: .
-    restart: unless-stopped
-    environment:
-      HLESS_REPOS: ""
-      HLESS_SECRET: ""
-      HLESS_MEDIAFLOW_URL: ""
-      HLESS_MEDIAFLOW_PASSWORD: ""
-    volumes:
-      - hless-data:/data
-    mem_limit: 512m
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.hless.rule=Host(`hless.example.org`)
-      - traefik.http.routers.hless.tls=true
-      - traefik.http.services.hless.loadbalancer.server.port=7000
-volumes:
-  hless-data:
-```
-
-The Traefik labels are a template: the maintainer's entry point and
-certificate resolver names are not known here. Do not publish port 7000 on
-the host when Traefik is used.
-
-Done when: `docker compose up --build` starts, and `/healthz` (2c) or
-`/health` on the engine port answers from inside the container.
-
-## B. Service without Docker (alternative to A)
-
-For running directly in an LXC container.
-
-1. Install Temurin 17 (Adoptium apt repository, package `temurin-17-jre`).
-2. Copy `daemon.jar` to `/opt/hless/daemon.jar`; create user `hless` and
-   `/var/lib/hless` owned by it.
-3. `/etc/hless.env` holds the `HLESS_*` variables, mode `0600`.
-4. `/etc/systemd/system/hless.service`:
-
-```ini
-[Unit]
-Description=cloudstream-hless
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=hless
-EnvironmentFile=/etc/hless.env
-ExecStart=/usr/bin/java --add-modules=jdk.incubator.foreign --enable-native-access=ALL-UNNAMED -XX:TieredStopAtLevel=1 -Xms16m -Xmx192m -XX:MaxDirectMemorySize=64m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -Dcs.cloudstream.home=/var/lib/hless -cp /opt/hless/daemon.jar com.lagradost.hless.HlessMainKt
-Restart=on-failure
-RestartSec=5
-MemoryMax=512M
-NoNewPrivileges=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/hless
-ProtectHome=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Done when: `systemctl enable --now hless` leaves the service `active` and it
-survives a reboot.
+Done when: the container starts from the GHCR image and `/healthz` (plan 2c)
+answers through Traefik.
 
 ## Tests
 
