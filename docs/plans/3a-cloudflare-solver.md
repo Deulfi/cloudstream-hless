@@ -87,6 +87,19 @@ fallback works.
 The solver, this container and MediaFlow must reach the internet through the
 same public IP, or the cookie and the stream links are useless.
 
+## Observed need
+
+2026-11-15, test repository of 25 extensions: the engine parked 3 challenged
+requests during one compatibility run and gave up on at least one of them
+(`solve.unavailable`, HTTP 403). Two providers did not answer a search
+within 30 seconds, which fits. Two of the 25 extensions reference the
+Cloudflare helper class. So this plan is needed for a small part of that
+repository, not for most of it.
+
+Until the loop exists, a challenged provider costs up to 90 seconds of
+waiting inside the engine. The per-provider timeout in 2e (45 s) bounds
+that.
+
 ## Done when
 
 A provider that failed with `remote_http_failure` (403/503) in the engine log

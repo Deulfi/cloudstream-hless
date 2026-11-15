@@ -2,6 +2,10 @@
 
 Read [README.md](README.md) first. Depends on: 2a.
 
+> [2f](2f-title-aliases.md) replaces `TitleInfo` with a list of names and
+> changes `pickMatch` and `Resolver` steps 2–3 accordingly. If you build both,
+> read 2f before writing `TitleMatcher.kt` and `Resolver.kt`.
+
 ## Problem
 
 Stremio asks for `tt0944947:1:2`. CloudStream providers only know "search by
@@ -89,8 +93,8 @@ Ties: keep the earlier result (providers return best hits first).
 4. If several match (sub and dub variants), prefer `audio == "sub"`, then
    `audio == null`, then the first.
 
-Out of scope, write nothing for it: absolute episode numbering for anime,
-specials (season 0), titles in other languages.
+Out of scope here: absolute episode numbering for anime (plan 3d), titles
+in other languages (plan 2f), specials (season 0).
 
 ## MatchCache
 

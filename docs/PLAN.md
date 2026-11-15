@@ -47,20 +47,22 @@ the failures were blocked or unreachable sites, not missing Android support.
 | :--- | :--- | :--- |
 | 0 | Fork and strip | done |
 | 1 | Engine runs headless on Linux, packaged as a container or service | [1](plans/1-container.md) |
-| 2 | Stremio addon: launcher, bootstrap, HTTP server, title resolution, streams | [2a](plans/2a-launcher-and-engine-client.md) [2b](plans/2b-bootstrap-repos.md) [2c](plans/2c-addon-server.md) [2d](plans/2d-title-resolution.md) [2e](plans/2e-streams.md) |
-| 3 | Only when needed: Cloudflare solver, provider catalogs, compatibility report | [3a](plans/3a-cloudflare-solver.md) [3b](plans/3b-catalogs.md) [3c](plans/3c-compat-report.md) |
+| 2 | Stremio addon: launcher, bootstrap, HTTP server, title resolution, streams, translated titles, ordering | [2a](plans/2a-launcher-and-engine-client.md) [2b](plans/2b-bootstrap-repos.md) [2c](plans/2c-addon-server.md) [2d](plans/2d-title-resolution.md) [2e](plans/2e-streams.md) [2f](plans/2f-title-aliases.md) [2g](plans/2g-stream-ordering.md) |
+| 3 | Only when needed: Cloudflare solver, provider catalogs, compatibility report, anime IDs, web-view extractors | [3a](plans/3a-cloudflare-solver.md) [3b](plans/3b-catalogs.md) [3c](plans/3c-compat-report.md) [3d](plans/3d-anime-kitsu.md) [3e](plans/3e-webview-extractors.md) |
+| 4 | Keeping up with upstream automatically | [4a](plans/4a-upstream-sync.md) |
 
 ## How a stream request flows (phase 2)
 
 ```
 Stremio → Traefik → addon server (0.0.0.0:7000)            2c
             parse "tt0944947:1:2"                           2d
-            Cinemeta: ID → title, year                      2d
+            TMDB / Cinemeta: ID → titles, year              2f, 2d
             per provider, in parallel:                      2e
               engine /search → pick match (cached on disk)  2d
               engine /details → pick episode                2d
               engine /links                                 2e
             map links → Stremio streams, wrap in MediaFlow  2e
+            rank and filter                                 2g
             answer at the deadline; the rest lands in a
             cache for the next request                      2e
 ```

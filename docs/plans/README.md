@@ -13,17 +13,26 @@ the others, except this page. [../PLAN.md](../PLAN.md) is the overview.
 | 2c | [2c-addon-server.md](2c-addon-server.md) | 2a | not started |
 | 2d | [2d-title-resolution.md](2d-title-resolution.md) | 2a | not started |
 | 2e | [2e-streams.md](2e-streams.md) | 2a, 2c, 2d | not started |
+| 2f | [2f-title-aliases.md](2f-title-aliases.md) | 2d | not started |
+| 2g | [2g-stream-ordering.md](2g-stream-ordering.md) | 2e | not started |
 | 3a | [3a-cloudflare-solver.md](3a-cloudflare-solver.md) | 2e | optional |
 | 3b | [3b-catalogs.md](3b-catalogs.md) | 2e | optional |
 | 3c | [3c-compat-report.md](3c-compat-report.md) | 1 | done |
+| 3d | [3d-anime-kitsu.md](3d-anime-kitsu.md) | 2e, 2f | optional |
+| 3e | [3e-webview-extractors.md](3e-webview-extractors.md) | 2e | optional; check its step 0 first |
+| 4a | [4a-upstream-sync.md](4a-upstream-sync.md) | nothing | not started |
 
-2b, 2c and 2d do not depend on each other. When you finish a plan, change its
-state here to `done` in the same commit.
+2b, 2c and 2d do not depend on each other. 2f changes parts of 2d, so build
+them together or one right after the other. When you finish a plan, change
+its state here to `done` in the same commit.
 
-Not planned: extensions that need an Android WebView to find their stream
-(the engine publishes these as `/media/pending` and `/webview/pending` tasks;
-nothing answers them here, so those extensions time out). It needs a headless
-browser with request interception and is a project of its own.
+Suggested order for a first usable version: 2a, 2c, 2d + 2f, 2e, 2g, 2b.
+Without 2f, providers that are not in English find almost nothing.
+
+Environment variables are defined in the plan that introduces them; `Config`
+(2a) holds all of them. Full list: 2a (core), 2f (`HLESS_TMDB_KEY`,
+`HLESS_LANGS`), 2g (ordering and provider filters), 3a (solver), 3d
+(`HLESS_ANIME_AUDIO`), 3e (`HLESS_BROWSER_URL`).
 
 ## Rules for every plan
 
@@ -40,7 +49,7 @@ browser with request interception and is a project of its own.
    ([../ipc-api.md](../ipc-api.md)), through `EngineClient`. Do not call the
    engine's Kotlin classes directly, except `com.lagradost.macos.main` to
    start it and the DTO classes in `com.lagradost.macos.models` to decode
-   its answers.
+   its answers. (Plan 3e adds one more exception; it says so itself.)
 4. **No new dependencies** unless a plan names them. Already available:
    Ktor server (Netty), OkHttp, kotlinx.serialization, kotlinx.coroutines,
    fuzzywuzzy, `kotlin.test`.

@@ -58,7 +58,9 @@ Housekeeping: every 60 seconds remove entries older than 5 minutes and cancel
 their jobs. Limit concurrent provider coroutines across all requests with a
 `Semaphore(16)`.
 
-Sorting: by quality descending (unknown last), then provider name.
+Sorting: by quality descending (unknown last), then provider name. Plan
+[2g](2g-stream-ordering.md) replaces this with language-aware ranking and
+filters.
 
 ## StreamMapper
 
