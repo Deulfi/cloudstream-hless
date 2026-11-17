@@ -7,12 +7,12 @@ import kotlin.test.assertNull
 class StremioIdTest {
     @Test
     fun `movie id parses`() {
-        assertEquals(StremioId("tt1111111", null, null), parseStremioId("movie", "tt1111111"))
+        assertEquals(StremioId("tt1111111", null, null, null), parseStremioId("movie", "tt1111111"))
     }
 
     @Test
     fun `series id parses`() {
-        assertEquals(StremioId("tt9944947", 1, 2), parseStremioId("series", "tt9944947:1:2"))
+        assertEquals(StremioId("tt9944947", null, 1, 2), parseStremioId("series", "tt9944947:1:2"))
     }
 
     @Test
@@ -42,5 +42,29 @@ class StremioIdTest {
     @Test
     fun `unknown type is rejected`() {
         assertNull(parseStremioId("channel", "tt1111111"))
+    }
+
+    @Test
+    fun `kitsu movie id parses`() {
+        assertEquals(StremioId(null, "123", null, null), parseStremioId("movie", "kitsu:123"))
+    }
+
+    @Test
+    fun `kitsu series id parses`() {
+        assertEquals(StremioId(null, "123", null, 5), parseStremioId("series", "kitsu:123:5"))
+    }
+
+    @Test
+    fun `kitsu anime id parses`() {
+        assertEquals(StremioId(null, "123", null, null), parseStremioId("anime", "kitsu:123"))
+        assertEquals(StremioId(null, "123", null, 5), parseStremioId("anime", "kitsu:123:5"))
+    }
+
+    @Test
+    fun `kitsu id with bad shape is rejected`() {
+        assertNull(parseStremioId("movie", "kitsu:"))
+        assertNull(parseStremioId("movie", "kitsu:12a"))
+        assertNull(parseStremioId("anime", "kitsu:123:4:5"))
+        assertNull(parseStremioId("anime", "tt1111111"))
     }
 }

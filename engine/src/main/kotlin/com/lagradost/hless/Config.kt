@@ -22,6 +22,7 @@ class ConfigValues(env: Map<String, String>) {
     val providersDeny: List<String>
     val providersAllow: List<String>
     val providersFirst: List<String>
+    val animeAudio: String
 
     init {
         port = intVar(env, "HLESS_PORT", 7000)
@@ -41,6 +42,7 @@ class ConfigValues(env: Map<String, String>) {
         providersDeny = listVar(env, "HLESS_PROVIDERS_DENY", emptyList())
         providersAllow = listVar(env, "HLESS_PROVIDERS_ALLOW", emptyList())
         providersFirst = listVar(env, "HLESS_PROVIDERS_FIRST", emptyList())
+        animeAudio = strVar(env, "HLESS_ANIME_AUDIO") ?: "sub"
     }
 
     private fun raw(env: Map<String, String>, name: String): String? =
@@ -87,4 +89,5 @@ object Config {
     val providersDeny: List<String> get() = values.providersDeny
     val providersAllow: List<String> get() = values.providersAllow
     val providersFirst: List<String> get() = values.providersFirst
+    val animeAudio: String get() = values.animeAudio
 }

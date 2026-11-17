@@ -34,31 +34,32 @@ class TitleSource(
     override suspend fun lookup(type: String, imdb: String): TitleInfo? {
         val key = "$type|$imdb|${langs.joinToString(",")}"
         val cached = store.get(key)?.let { entry ->
-        val at = (entry as? JsonObject)?.get("at")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
-            if (System.currentTimeMillis() - at < TTL) decode(entry) else null
+            val at = (entry as? JsonObject)?.get("at")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+            if (System.currentTimeMillis() - at < TTL) titleInfoFrom(entry) else null
         }
         if (cached != null) return cached
         val info = if (tmdbKey != null && !Tmdb.isRejected()) {
             tmdb(type, imdb, tmdbKey, langs)
         } else null
         val resolved = info ?: cinemeta(type, imdb) ?: return null
-        store.put(key, encode(resolved))
+        store.put(key, titleInfoJson(resolved))
         return resolved
-    }
-
-    private fun encode(info: TitleInfo): JsonObject = buildJsonObject {
-        put("names", JsonArray(info.names.map { JsonPrimitive(it) }))
-        put("year", info.year?.let { JsonPrimitive(it) } ?: JsonNull)
-    }
-
-    private fun decode(entry: JsonElement): TitleInfo? {
-        val value = (entry as? JsonObject)?.get("value") as? JsonObject ?: return null
-        val names = value.get("names")?.jsonArray?.map { it.jsonPrimitive.content } ?: return null
-        val year = value.get("year")?.jsonPrimitive?.content?.toIntOrNull()
-        return TitleInfo(names, year)
     }
 
     companion object {
         private val TTL = TimeUnit.DAYS.toMillis(30)
     }
+}
+
+/** The on-disk value of a [TitleInfo] (2f, 3d). */
+fun titleInfoJson(info: TitleInfo): JsonObject = buildJsonObject {
+    put("names", JsonArray(info.names.map { JsonPrimitive(it) }))
+    put("year", info.year?.let { JsonPrimitive(it) } ?: JsonNull)
+}
+
+fun titleInfoFrom(entry: JsonElement): TitleInfo? {
+    val value = (entry as? JsonObject)?.get("value") as? JsonObject ?: return null
+    val names = value.get("names")?.jsonArray?.map { it.jsonPrimitive.content } ?: return null
+    val year = value.get("year")?.jsonPrimitive?.content?.toIntOrNull()
+    return TitleInfo(names, year)
 }

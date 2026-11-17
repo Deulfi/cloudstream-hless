@@ -80,4 +80,46 @@ class TitleMatcherTest {
         val d = details(listOf(ep("dub", 1, 1, "dub"), ep("none", 1, 1)))
         assertEquals("none", pickEpisode(d, 1, 1)?.data)
     }
+
+    @Test
+    fun `anime single season picks by episode number`() {
+        val d = details(listOf(ep("a", 1, 1), ep("b", 1, 2), ep("c", 1, 3)))
+        assertEquals("b", pickAnimeEpisode(d, "Cowboy Bebop", null, 2)?.data)
+    }
+
+    @Test
+    fun `anime entry name season marker selects the season`() {
+        val d = details(listOf(ep("s1e5", 1, 5), ep("s2e5", 2, 5)))
+        assertEquals("s2e5", pickAnimeEpisode(d, "Cowboy Bebop Season 2", null, 5)?.data)
+    }
+
+    @Test
+    fun `anime no marker uses the first season`() {
+        val d = details(listOf(ep("s1e1", 1, 1), ep("s2e1", 2, 1)))
+        assertEquals("s1e1", pickAnimeEpisode(d, "Cowboy Bebop", null, 1)?.data)
+    }
+
+    @Test
+    fun `anime absolute numbering when the first season has no such episode`() {
+        val d = details(listOf(ep("s1e1", 1, 1), ep("s2e2", 2, 2), ep("s2e3", 2, 3)))
+        assertEquals("s2e3", pickAnimeEpisode(d, "Cowboy Bebop", null, 3)?.data)
+    }
+
+    @Test
+    fun `anime sub audio is preferred`() {
+        val d = details(listOf(ep("dub", 1, 2, "dub"), ep("sub", 1, 2, "sub")))
+        assertEquals("sub", pickAnimeEpisode(d, "Cowboy Bebop", null, 2)?.data)
+    }
+
+    @Test
+    fun `anime matched result season marker selects its season`() {
+        val d = details(listOf(ep("s1e5", 1, 5), ep("s2e5", 2, 5)))
+        assertEquals("s2e5", pickAnimeEpisode(d, "Cowboy Bebop", "Cowboy Bebop Season 2", 5)?.data)
+    }
+
+    @Test
+    fun `anime specials with season zero are ignored`() {
+        val d = details(listOf(ep("special", 0, 1), ep("e1", 1, 1)))
+        assertEquals("e1", pickAnimeEpisode(d, "Cowboy Bebop", null, 1)?.data)
+    }
 }

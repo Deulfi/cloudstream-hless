@@ -26,6 +26,6 @@ fun main() {
         }
         println("hless: engine ready on 127.0.0.1:${Config.enginePort}")
         bootstrap(client)
-        startAddonServer(StreamServiceImpl(client, titles))
+        startAddonServer(StreamServiceImpl(client, titles), client)
     }
 }

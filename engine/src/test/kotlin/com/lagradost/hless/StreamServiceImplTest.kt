@@ -1,7 +1,9 @@
 package com.lagradost.hless
 
 import com.lagradost.macos.models.DetailsDto
+import com.lagradost.macos.models.EpisodeDto
 import com.lagradost.macos.models.HealthDto
+import com.lagradost.macos.models.HomePageDto
 import com.lagradost.macos.models.LinksResponseDto
 import com.lagradost.macos.models.PluginDto
 import com.lagradost.macos.models.ProviderInfoDto
@@ -28,6 +30,7 @@ class StreamServiceImplTest {
 
     private class FakeClient(
         private val providers: List<ProviderInfoDto>,
+        private val details: DetailsDto? = null,
         private val linksDelayMs: Map<String, Long> = emptyMap(),
         private val links: Map<String, List<StreamLinkDto>> = emptyMap(),
         private val fail: Set<String> = emptySet(),
@@ -42,7 +45,8 @@ class StreamServiceImplTest {
                 SearchResultDto(name = "Test Movie", url = "https://$providerId/page", provider = providerId, type = "Movie", year = 2020),
             )
         override suspend fun details(providerId: String, url: String, timeoutMs: Long): DetailsDto =
-            DetailsDto(provider = providerId, url = url, name = "Test Movie", type = "Movie", movieData = "data-$providerId")
+            details ?: DetailsDto(provider = providerId, url = url, name = "Test Movie", type = "Movie", movieData = "data-$providerId")
+        override suspend fun home(providerId: String, page: Int, timeoutMs: Long): HomePageDto = error("not used")
         override suspend fun links(providerId: String, data: String, budgetMs: Long): LinksResponseDto {
             linkCalls.merge(providerId, 1, Int::plus)
             linksDelayMs[providerId]?.let { delay(it) }
@@ -87,5 +91,25 @@ class StreamServiceImplTest {
         val service = StreamServiceImpl(fake, titles = FakeTitles(), settings = RankSettings(), deadlineMs = 5_000)
         val streams = service.streams("movie", "tt0000002")
         assertEquals(listOf("https://a.example/stream"), streams.map { it.url })
+    }
+
+    @Test
+    fun `hless ids go through a direct provider lookup and details call`() = runBlocking {
+        val fake = FakeClient(
+            providers = listOf(provider("a")),
+            details = DetailsDto(
+                provider = "a",
+                url = "https://a/m1",
+                name = "A Movie",
+                type = "Movie",
+                movieData = "data",
+                episodes = listOf(EpisodeDto(data = "e1", name = "E1", season = 1, episode = 1)),
+            ),
+            links = mapOf("a" to listOf(link("https://a.stream"))),
+        )
+        val service = StreamServiceImpl(fake, titles = FakeTitles(), settings = RankSettings(), deadlineMs = 5_000)
+        val streams = service.streams("movie", HlessId("a", "https://a/m1").encode())
+        assertEquals(1, streams.size)
+        assertEquals("https://a.stream", streams[0].url)
     }
 }

@@ -142,9 +142,11 @@ object HlessStores {
 
     val matchStore: JsonFileStore by lazy { JsonFileStore(File(dataDir, "matches.json")) }
     val titleStore: JsonFileStore by lazy { JsonFileStore(File(dataDir, "titles.json")) }
+    val kitsuStore: JsonFileStore by lazy { JsonFileStore(File(dataDir, "kitsu.json")) }
 
     fun shutdown() {
         runCatching { matchStore.close() }
         runCatching { titleStore.close() }
+        runCatching { kitsuStore.close() }
     }
 }

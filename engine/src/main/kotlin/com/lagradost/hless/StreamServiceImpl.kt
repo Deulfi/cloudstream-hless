@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 class StreamServiceImpl(
     private val client: EngineClient,
     private val titles: TitleLookup = TitleSource(),
+    private val kitsuLookup: TitleLookup = KitsuLookup(),
     private val settings: RankSettings = RankSettings(
         langs = Config.langs,
         minQuality = Config.minQuality,
@@ -61,24 +62,61 @@ class StreamServiceImpl(
     }
 
     override suspend fun streams(type: String, id: String): List<StremioStream> {
+        if (id.startsWith("hless:")) return hlessStreams(id)
         val parsedId = parseStremioId(type, id) ?: return emptyList()
         if (MediaFlow.configured()) MediaFlow.wake(scope)
-        val key = "$type/$id"
+        val kitsu = parsedId.kitsu != null
+        val effectiveType = if (type == "anime") {
+            if (parsedId.episode != null) "series" else "movie"
+        } else type
+        val key = "$effectiveType/$id"
         val existing = cache[key]
         if (existing != null && System.currentTimeMillis() - existing.startedAt < ENTRY_TTL) {
             return settle(existing)
         }
-        val info = titles.lookup(type, parsedId.imdb) ?: return emptyList()
+        val info = if (kitsu) {
+            kitsuLookup.lookup(effectiveType, parsedId.kitsu!!)
+        } else {
+            titles.lookup(effectiveType, parsedId.imdb!!)
+        } ?: return emptyList()
         val providers = client.providers().filter { provider ->
-            provider.tvTypes.any { it in wantedTypes(type) } && askProvider(provider.name, settings)
+            val hasType = if (kitsu) {
+                provider.tvTypes.any { it in kitsuProviderTypes }
+            } else {
+                provider.tvTypes.any { it in wantedTypes(effectiveType) }
+            }
+            hasType && askProvider(provider.name, settings)
         }
-        val entry = newEntry(providers, type, parsedId, info)
+        val entry = newEntry(providers, effectiveType, parsedId, info)
         val previous = cache.putIfAbsent(key, entry)
         if (previous != null && System.currentTimeMillis() - previous.startedAt < ENTRY_TTL) {
             entry.job.cancel()
             return settle(previous)
         }
         return settle(entry)
+    }
+
+    /**
+     * hless ids (3b): one provider's title. No entry cache — details and
+     * links run per request.
+     */
+    private suspend fun hlessStreams(id: String): List<StremioStream> {
+        val hless = HlessId.decode(id) ?: return emptyList()
+        if (MediaFlow.configured()) MediaFlow.wake(scope)
+        val provider = client.providers().firstOrNull { it.providerId == hless.providerId }
+            ?: return emptyList()
+        if (!askProvider(provider.name, settings)) return emptyList()
+        val details = client.details(hless.providerId, hless.url, timeoutMs = 20_000)
+        val data = when {
+            hless.episode != null -> pickEpisode(details, hless.season ?: 1, hless.episode)?.data
+            details.movieData != null -> details.movieData
+            details.episodes.size == 1 -> details.episodes.single().data
+            else -> null
+        } ?: return emptyList()
+        val response = client.links(hless.providerId, data, budgetMs = 25_000)
+        return response.links.mapNotNull { link ->
+            StreamMapper.map(provider.name, provider.providerId, link, response.subtitles, provider.language)
+        }
     }
 
     private fun newEntry(

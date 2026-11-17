@@ -10,6 +10,11 @@ private val defaultCache = MatchCache(HlessStores.matchStore)
  * search (at most the first two names) -> pickMatch -> cache -> details ->
  * movieData or episode.data.
  *
+ * For a Kitsu id (3d) the wanted types come from [wantedKitsuTypes], the
+ * cache key is `kitsu:<id>`, and the details pick is
+ * [pickAnimeEpisode] (or the only episode, when the provider models films
+ * as one episode).
+ *
  * Network failures are not stored as misses; a details 404 / provider_no_data
  * forgets the cached url.
  */
@@ -22,21 +27,25 @@ suspend fun resolveData(
     timeoutMs: Long,
     cache: MatchCache = defaultCache,
 ): String? {
-    val url: String? = when (val hit = cache.lookup(id.imdb, providerId)) {
+    val key = id.imdb ?: id.kitsu?.let { "kitsu:$it" } ?: return null
+    val kitsu = id.kitsu != null
+    var matchName: String? = null
+    val url: String? = when (val hit = cache.lookup(key, providerId)) {
         is MatchCache.Entry.Absent -> {
             var match: SearchResultDto? = null
             for (name in info.names.take(2)) {
                 val results = client.search(providerId, name, timeoutMs)
-                pickMatch(info, type, results)?.let {
+                pickMatch(info, type, results, kitsu, id.episode)?.let {
                     match = it
                     break
                 }
             }
             if (match != null) {
-                cache.store(id.imdb, providerId, match.url)
+                cache.store(key, providerId, match.url)
+                matchName = match.name
                 match.url
             } else {
-                cache.store(id.imdb, providerId, null)
+                cache.store(key, providerId, null)
                 null
             }
         }
@@ -48,14 +57,17 @@ suspend fun resolveData(
         client.details(providerId, url, timeoutMs)
     } catch (e: EngineException) {
         if (e.status == 404 || e.code == "provider_no_data") {
-            cache.forget(id.imdb, providerId)
+            cache.forget(key, providerId)
             return null
         }
         throw e
     }
-    return when (type) {
-        "movie" -> details.movieData
-        "series" -> pickEpisode(details, id.season!!, id.episode!!)?.data
+    return when {
+        kitsu && id.episode == null -> details.movieData
+            ?: details.episodes.singleOrNull()?.data
+        kitsu -> pickAnimeEpisode(details, info.names.firstOrNull() ?: "", matchName, id.episode!!)?.data
+        type == "movie" -> details.movieData
+        type == "series" -> pickEpisode(details, id.season!!, id.episode!!)?.data
         else -> null
     }
 }

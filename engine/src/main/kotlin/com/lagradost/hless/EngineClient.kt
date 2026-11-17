@@ -2,6 +2,7 @@ package com.lagradost.hless
 
 import com.lagradost.macos.models.DetailsDto
 import com.lagradost.macos.models.HealthDto
+import com.lagradost.macos.models.HomePageDto
 import com.lagradost.macos.models.LinksRequestDto
 import com.lagradost.macos.models.LinksResponseDto
 import com.lagradost.macos.models.PluginDto
@@ -44,6 +45,9 @@ interface EngineClient {
     suspend fun search(providerId: String, query: String, timeoutMs: Long): List<SearchResultDto>
 
     suspend fun details(providerId: String, url: String, timeoutMs: Long): DetailsDto
+
+    /** GET /home — one page of the provider's main shelves. */
+    suspend fun home(providerId: String, page: Int, timeoutMs: Long = 30_000): HomePageDto
 
     /** [budgetMs] is clamped to 1000..45000, the engine's valid range. */
     suspend fun links(providerId: String, data: String, budgetMs: Long): LinksResponseDto
@@ -116,6 +120,16 @@ class OkHttpEngineClient(
             timeoutMs = timeoutMs,
         ) {
             json.decodeFromString<DetailsDto>(it)
+        }
+
+    override suspend fun home(providerId: String, page: Int, timeoutMs: Long): HomePageDto =
+        request(
+            "GET",
+            "/home",
+            query = { it.addQueryParameter("plugin", providerId).addQueryParameter("page", page.toString()) },
+            timeoutMs = timeoutMs,
+        ) {
+            json.decodeFromString<HomePageDto>(it)
         }
 
     override suspend fun links(providerId: String, data: String, budgetMs: Long): LinksResponseDto {
