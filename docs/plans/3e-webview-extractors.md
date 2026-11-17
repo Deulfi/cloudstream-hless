@@ -151,3 +151,6 @@ An extension that returned no links before returns links, and the engine log
 shows the media task completed.
 
 ## Findings
+
+2026-11-17: step 0 scan of the installed extensions found no
+`WebViewResolver` or Android `WebView` usage. Nothing needs this plan.

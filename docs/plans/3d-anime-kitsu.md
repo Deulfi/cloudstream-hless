@@ -130,3 +130,9 @@ Tests pass, and with an anime provider installed a `kitsu:` episode plays
 from Stremio's anime catalog. This has not been tried against a real anime
 provider; write what you observe under "Findings" at the bottom of this
 file.
+
+## Findings
+
+2026-11-17: tried against a real anime provider from the test repository on
+the live container. A stream request for `kitsu:1:5` returned 4 streams.
+The provider does not name its links, so the streams carry no title.

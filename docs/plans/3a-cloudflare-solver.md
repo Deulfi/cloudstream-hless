@@ -105,3 +105,12 @@ that.
 A provider that failed with `remote_http_failure` (403/503) in the engine log
 returns results after the solver container is added, and the log shows
 `solve.completed`.
+
+## Findings
+
+2026-11-17: implemented and live-checked on the test container. With
+`HLESS_SOLVER_URL` pointing at a Solverr 1.8.0 instance on the Proxmox LAN,
+the loop starts after engine readiness and polls `/solve/pending` without
+errors; the solver answers `/v1`. The full "Done when" has not occurred
+yet: none of the installed providers hit a Cloudflare challenge on demand,
+so no `solve.completed` has been logged.

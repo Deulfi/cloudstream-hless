@@ -10,6 +10,7 @@ import com.lagradost.macos.models.ProviderInfoDto
 import com.lagradost.macos.models.RepoPluginDto
 import com.lagradost.macos.models.RepositoryDto
 import com.lagradost.macos.models.SearchResultDto
+import com.lagradost.macos.models.SolvePendingDto
 import com.lagradost.macos.models.StreamLinkDto
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -59,6 +60,10 @@ class StreamServiceImplTest {
         override suspend fun repoPlugins(url: String, timeoutMs: Long): List<RepoPluginDto> = emptyList()
         override suspend fun install(repoUrl: String, internalName: String, timeoutMs: Long): PluginDto = error("not used")
         override suspend fun plugins(timeoutMs: Long): List<PluginDto> = emptyList()
+
+        override suspend fun pendingSolves(waitMs: Long): List<SolvePendingDto> = emptyList()
+
+        override suspend fun completeSolve(taskId: String, targetUrl: String, cookies: String) {}
     }
 
     @Test

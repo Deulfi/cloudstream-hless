@@ -23,6 +23,8 @@ class ConfigValues(env: Map<String, String>) {
     val providersAllow: List<String>
     val providersFirst: List<String>
     val animeAudio: String
+    val solverUrl: String?
+    val solverTimeoutMs: Long
 
     init {
         port = intVar(env, "HLESS_PORT", 7000)
@@ -43,6 +45,8 @@ class ConfigValues(env: Map<String, String>) {
         providersAllow = listVar(env, "HLESS_PROVIDERS_ALLOW", emptyList())
         providersFirst = listVar(env, "HLESS_PROVIDERS_FIRST", emptyList())
         animeAudio = strVar(env, "HLESS_ANIME_AUDIO") ?: "sub"
+        solverUrl = strVar(env, "HLESS_SOLVER_URL")?.let(::stripTrailingSlash)
+        solverTimeoutMs = longVar(env, "HLESS_SOLVER_TIMEOUT_MS", 60_000)
     }
 
     private fun raw(env: Map<String, String>, name: String): String? =
@@ -90,4 +94,6 @@ object Config {
     val providersAllow: List<String> get() = values.providersAllow
     val providersFirst: List<String> get() = values.providersFirst
     val animeAudio: String get() = values.animeAudio
+    val solverUrl: String? get() = values.solverUrl
+    val solverTimeoutMs: Long get() = values.solverTimeoutMs
 }

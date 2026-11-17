@@ -42,7 +42,8 @@ object Tmdb {
         val original = first.get(originalField)?.jsonPrimitive?.content
         val date = first.get(dateField)?.jsonPrimitive?.content
 
-        val translationList = (translations as? JsonObject)?.get("translations") as? JsonArray
+        val appended = (translations as? JsonObject)?.get("translations")
+        val translationList = (appended as? JsonArray) ?: (appended as? JsonObject)?.get("translations") as? JsonArray
         fun titleFor(lang: String): String? =
             translationList
                 ?.firstOrNull { (it as? JsonObject)?.get("iso_639_1")?.jsonPrimitive?.content?.equals(lang, ignoreCase = true) == true }

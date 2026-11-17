@@ -26,6 +26,8 @@ class ConfigTest {
         assertEquals(emptyList(), config.providersDeny)
         assertEquals(emptyList(), config.providersAllow)
         assertEquals(emptyList(), config.providersFirst)
+        assertEquals(null, config.solverUrl)
+        assertEquals(60_000L, config.solverTimeoutMs)
     }
 
     @Test
@@ -54,11 +56,13 @@ class ConfigTest {
             "HLESS_PUBLIC_URL" to "https://example.com/",
             "HLESS_REPOS" to "https://a.example/repo.json/",
             "HLESS_MEDIAFLOW_URL" to "http://mf.example/",
+            "HLESS_SOLVER_URL" to "http://10.0.0.5:8191/",
         ),
         )
         assertEquals("https://example.com", config.publicUrl)
         assertEquals(listOf("https://a.example/repo.json"), config.repos)
         assertEquals("http://mf.example", config.mediaflowUrl)
+        assertEquals("http://10.0.0.5:8191", config.solverUrl)
     }
 
     @Test
@@ -84,11 +88,13 @@ class ConfigTest {
                 "HLESS_DEADLINE_MS" to "25000",
                 "HLESS_MIN_QUALITY" to "720",
                 "HLESS_MAX_STREAMS" to "12",
+                "HLESS_SOLVER_TIMEOUT_MS" to "90000",
             ),
         )
         assertEquals(8080, config.port)
         assertEquals(25_000L, config.deadlineMs)
         assertEquals(720, config.minQuality)
         assertEquals(12, config.maxStreams)
+        assertEquals(90_000L, config.solverTimeoutMs)
     }
 }

@@ -13,6 +13,8 @@ import com.lagradost.macos.models.RepoPluginDto
 import com.lagradost.macos.models.ReposSyncRequestDto
 import com.lagradost.macos.models.RepositoryDto
 import com.lagradost.macos.models.SearchResultDto
+import com.lagradost.macos.models.SolveCallbackRequestDto
+import com.lagradost.macos.models.SolvePendingDto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -63,6 +65,12 @@ interface EngineClient {
     suspend fun install(repoUrl: String, internalName: String, timeoutMs: Long = 120_000): PluginDto
 
     suspend fun plugins(timeoutMs: Long = 30_000): List<PluginDto>
+
+    /** Long-polls parked Cloudflare challenge tasks (GET /solve/pending). */
+    suspend fun pendingSolves(waitMs: Long): List<SolvePendingDto>
+
+    /** Hands solved cookies back to the engine (POST /solve-callback). */
+    suspend fun completeSolve(taskId: String, targetUrl: String, cookies: String)
 }
 
 class OkHttpEngineClient(
@@ -199,6 +207,29 @@ class OkHttpEngineClient(
         request("GET", "/plugins", timeoutMs = timeoutMs) {
             json.decodeFromString<List<PluginDto>>(it)
         }
+
+    override suspend fun pendingSolves(waitMs: Long): List<SolvePendingDto> =
+        request(
+            "GET",
+            "/solve/pending",
+            query = { it.addQueryParameter("waitMs", waitMs.toString()) },
+            // The engine holds the request until waitMs elapses.
+            timeoutMs = waitMs + 10_000,
+        ) {
+            json.decodeFromString<List<SolvePendingDto>>(it)
+        }
+
+    override suspend fun completeSolve(taskId: String, targetUrl: String, cookies: String) {
+        request(
+            "POST",
+            "/solve-callback",
+            body = json.encodeToString(
+                SolveCallbackRequestDto(taskId = taskId, targetUrl = targetUrl, cookies = cookies),
+            ),
+            timeoutMs = 10_000,
+        ) {
+        }
+    }
 
     private suspend fun <T> request(
         method: String,

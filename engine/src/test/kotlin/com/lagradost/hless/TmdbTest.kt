@@ -61,4 +61,20 @@ class TmdbTest {
         val translations = json.parseToJsonElement("""{"translations":[]}""")
         assertNull(Tmdb.buildNames("movie", find, translations, listOf("en")))
     }
+
+    @Test
+    fun `appended nested translations are read`() {
+        val find = json.parseToJsonElement(
+            """{"movie_results":[{"id":603,"title":"The Matrix","original_title":"The Matrix","release_date":"1999-03-30"}]}""",
+        )
+        val appended = json.parseToJsonElement(
+            """{"adult":false,"translations":{"translations":[
+                {"iso_639_1":"de","data":{"title":"Matrix"}},
+                {"iso_639_1":"en","data":{"title":""}}
+            ]}}""",
+        )
+        val info = Tmdb.buildNames("movie", find, appended, listOf("de", "en"))
+        assertEquals(listOf("Matrix", "The Matrix"), info?.names)
+        assertEquals(1999, info?.year)
+    }
 }

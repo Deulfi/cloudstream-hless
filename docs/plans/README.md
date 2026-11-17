@@ -8,18 +8,18 @@ the others, except this page. [../PLAN.md](../PLAN.md) is the overview.
 | # | Plan | Needs | State |
 | :--- | :--- | :--- | :--- |
 | 1 | [1-container.md](1-container.md) | nothing | done, except creating the LXC on Proxmox |
-| 2a | [2a-launcher-and-engine-client.md](2a-launcher-and-engine-client.md) | 1 | done, except the live start check on the container |
-| 2b | [2b-bootstrap-repos.md](2b-bootstrap-repos.md) | 2a | done, except the live repo check on the container |
-| 2c | [2c-addon-server.md](2c-addon-server.md) | 2a | done, except the live manifest check |
+| 2a | [2a-launcher-and-engine-client.md](2a-launcher-and-engine-client.md) | 1 | done |
+| 2b | [2b-bootstrap-repos.md](2b-bootstrap-repos.md) | 2a | done |
+| 2c | [2c-addon-server.md](2c-addon-server.md) | 2a | done |
 | 2d | [2d-title-resolution.md](2d-title-resolution.md) | 2a | done |
-| 2e | [2e-streams.md](2e-streams.md) | 2a, 2c, 2d | done, except the live stream check on the container |
-| 2f | [2f-title-aliases.md](2f-title-aliases.md) | 2d | done, except the live alias check on the container |
-| 2g | [2g-stream-ordering.md](2g-stream-ordering.md) | 2e | done, except the live ordering check |
-| 3a | [3a-cloudflare-solver.md](3a-cloudflare-solver.md) | 2e | optional |
-| 3b | [3b-catalogs.md](3b-catalogs.md) | 2e | optional |
+| 2e | [2e-streams.md](2e-streams.md) | 2a, 2c, 2d | done |
+| 2f | [2f-title-aliases.md](2f-title-aliases.md) | 2d | done |
+| 2g | [2g-stream-ordering.md](2g-stream-ordering.md) | 2e | done |
+| 3a | [3a-cloudflare-solver.md](3a-cloudflare-solver.md) | 2e | optional; implemented, live check pending a challenged provider |
+| 3b | [3b-catalogs.md](3b-catalogs.md) | 2e | done |
 | 3c | [3c-compat-report.md](3c-compat-report.md) | 1 | done |
-| 3d | [3d-anime-kitsu.md](3d-anime-kitsu.md) | 2e, 2f | optional |
-| 3e | [3e-webview-extractors.md](3e-webview-extractors.md) | 2e | optional; check its step 0 first |
+| 3d | [3d-anime-kitsu.md](3d-anime-kitsu.md) | 2e, 2f | done |
+| 3e | [3e-webview-extractors.md](3e-webview-extractors.md) | 2e | not needed (step 0: no web-view usage in the installed extensions) |
 | 4a | [4a-upstream-sync.md](4a-upstream-sync.md) | nothing | done, except the first workflow run on GitHub |
 
 2b, 2c and 2d do not depend on each other. 2f changes parts of 2d, so build

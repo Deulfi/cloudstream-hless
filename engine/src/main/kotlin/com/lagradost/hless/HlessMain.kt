@@ -25,6 +25,10 @@ fun main() {
             kotlin.system.exitProcess(1)
         }
         println("hless: engine ready on 127.0.0.1:${Config.enginePort}")
+        Config.solverUrl?.let { url ->
+            println("hless: solver loop started ($url)")
+            SolverLoop(client, url).start(this)
+        }
         bootstrap(client)
         startAddonServer(StreamServiceImpl(client, titles), client)
     }

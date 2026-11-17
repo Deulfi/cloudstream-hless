@@ -9,6 +9,7 @@ import com.lagradost.macos.models.ProviderInfoDto
 import com.lagradost.macos.models.RepoPluginDto
 import com.lagradost.macos.models.RepositoryDto
 import com.lagradost.macos.models.SearchResultDto
+import com.lagradost.macos.models.SolvePendingDto
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -74,6 +75,10 @@ class BootstrapTest {
             return PluginDto(id = internalName, name = internalName, internalName = internalName)
         }
         override suspend fun plugins(timeoutMs: Long): List<PluginDto> = emptyList()
+
+        override suspend fun pendingSolves(waitMs: Long): List<SolvePendingDto> = emptyList()
+
+        override suspend fun completeSolve(taskId: String, targetUrl: String, cookies: String) {}
     }
 
     @Test
