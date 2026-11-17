@@ -180,7 +180,7 @@ private suspend fun ApplicationCall.metaRoute(client: EngineClient, type: String
         return respond(HttpStatusCode.BadGateway)
     }
     response.headers.append(HttpHeaders.CacheControl, "max-age=300")
-    respond(meta)
+    respond(buildJsonObject { put("meta", meta) })
 }
 
 private fun videos(hless: HlessId, details: DetailsDto): List<JsonObject> =

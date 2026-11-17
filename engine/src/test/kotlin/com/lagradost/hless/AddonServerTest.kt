@@ -190,9 +190,10 @@ class AddonServerTest {
             val response = client.get("/meta/movie/$id.json")
             assertEquals(HttpStatusCode.OK, response.status)
             val json = Json.parseToJsonElement(response.body<String>()).jsonObject
-            assertEquals("A Movie", json["name"]!!.jsonPrimitive.content)
-            assertEquals("2020", json["releaseInfo"]!!.jsonPrimitive.content)
-            val videos = json["videos"]!!.jsonArray.map { it.jsonObject }
+            val meta = json["meta"]!!.jsonObject
+            assertEquals("A Movie", meta["name"]!!.jsonPrimitive.content)
+            assertEquals("2020", meta["releaseInfo"]!!.jsonPrimitive.content)
+            val videos = meta["videos"]!!.jsonArray.map { it.jsonObject }
             assertEquals(2, videos.size)
             assertEquals(HlessId("a", "https://a/m1", 1, 1).encode(), videos[0]["id"]!!.jsonPrimitive.content)
             assertEquals("E1", videos[0]["title"]!!.jsonPrimitive.content)

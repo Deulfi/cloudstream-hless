@@ -39,7 +39,7 @@ private suspend fun syncAndInstall(client: EngineClient, url: String) {
             continue
         }
         try {
-            client.install(url, plugin.internalName)
+            installWithConsent(client, url, plugin.internalName)
             println("hless: ${plugin.name} installed")
         } catch (e: EngineException) {
             println("hless: ${plugin.name} failed: ${e.code} ${e.message}")
@@ -56,6 +56,20 @@ private suspend fun syncRepo(client: EngineClient, url: String) {
         if (e.code != "consent_required") throw e
         client.consent(url)
         client.syncRepo(url, installAll = false)
+    }
+}
+
+/**
+ * The engine gates installs behind per-repo consent, but not syncs, so the
+ * consent answer can only surface here. Grant it once and retry.
+ */
+internal suspend fun installWithConsent(client: EngineClient, url: String, internalName: String) {
+    try {
+        client.install(url, internalName)
+    } catch (e: EngineException) {
+        if (e.code != "consent_required") throw e
+        client.consent(url)
+        client.install(url, internalName)
     }
 }
 

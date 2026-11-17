@@ -98,7 +98,9 @@ object Tmdb {
             val tmdbId = findId(type, findJson) ?: return@withContext null
 
             val path = if (type == "movie") "/movie/$tmdbId" else "/tv/$tmdbId"
-            val transResponse = runCatching { client.newCall(request(path) {  }).execute() }.getOrNull()
+            val transResponse = runCatching {
+                client.newCall(request(path) { it.addQueryParameter("append_to_response", "translations") }).execute()
+            }.getOrNull()
                 ?: return@withContext null
             var transJson: JsonElement? = null
             transResponse.use {
