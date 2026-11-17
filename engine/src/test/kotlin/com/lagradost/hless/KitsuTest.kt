@@ -1,5 +1,9 @@
 package com.lagradost.hless
 
+import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.io.path.createTempDirectory
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -38,5 +42,23 @@ class KitsuTest {
         val info = Kitsu.parse(attributes("""{"titles":{"en":"X"}}"""))
         assertEquals(listOf("X"), info?.names)
         assertNull(info?.year)
+    }
+
+    @Test
+    fun `kitsu disk cache serves a hit`() = runBlocking {
+        val store = JsonFileStore(File(createTempDirectory("hless-kitsu").toString(), "kitsu.json"))
+        val detailCalls = AtomicInteger(0)
+        val lookup = KitsuLookup(
+            store = store,
+            detail = { _ ->
+                detailCalls.incrementAndGet()
+                Json.parseToJsonElement("""{"titles":{"en":"X"},"canonicalTitle":"X"}""").jsonObject
+            },
+        )
+        assertEquals(TitleInfo(listOf("X"), null), lookup.lookup("series", "123"))
+        assertEquals(1, detailCalls.get())
+        // cached: detail is not called again
+        assertEquals(TitleInfo(listOf("X"), null), lookup.lookup("series", "123"))
+        assertEquals(1, detailCalls.get())
     }
 }

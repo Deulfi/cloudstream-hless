@@ -90,10 +90,7 @@ class KitsuLookup(
         }
         if (cached != null) return cached
         val info = detail(imdb)?.let { Kitsu.parse(it) } ?: return null
-        store.put(key, buildJsonObject {
-            put("at", JsonPrimitive(System.currentTimeMillis()))
-            put("value", titleInfoJson(info))
-        })
+        store.put(key, titleInfoJson(info))
         return info
     }
 
