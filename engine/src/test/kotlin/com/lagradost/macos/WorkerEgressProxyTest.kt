@@ -114,8 +114,14 @@ class WorkerEgressProxyTest {
         try {
             val first = tunnel(proxy.settings, silent.localPort)
             first.use { assertEquals(-1, it.getInputStream().read(), "the proxy closed the idle tunnel") }
-            // The only slot is free again: a new tunnel is admitted.
-            tunnel(proxy.settings, silent.localPort).close()
+            // The only slot is free again: a new tunnel is admitted. The slot is
+            // released a moment after the first tunnel's socket closes, so retry
+            // across that scheduling gap instead of assuming it is free already.
+            val second = (1..100).firstNotNullOfOrNull {
+                runCatching { tunnel(proxy.settings, silent.localPort) }.getOrNull()
+            }
+            assertNotNull(second, "the freed slot admitted a new tunnel")
+            second.close()
         } finally {
             proxy.close(); silent.close()
         }
