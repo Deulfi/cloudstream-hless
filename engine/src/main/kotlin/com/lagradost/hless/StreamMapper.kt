@@ -2,6 +2,7 @@ package com.lagradost.hless
 
 import com.lagradost.macos.models.StreamLinkDto
 import com.lagradost.macos.models.SubtitleDto
+import java.util.Locale
 
 /**
  * Maps one engine link to a Stremio stream, or null when the link must be
@@ -27,7 +28,7 @@ object StreamMapper {
         if (link.drm != null && proxy == null) return null
 
         val qualityLabel = if (link.quality > 0) "${link.quality}p" else "?"
-        val languageLabel = providerLanguage?.takeIf { it.isNotBlank() }?.uppercase()
+        val languageLabel = providerLanguage?.takeIf { it.isNotBlank() }?.let(::flagOf)
         val name = buildString {
             append("CS ")
             if (languageLabel != null) {
@@ -65,5 +66,19 @@ object StreamMapper {
             behaviorHints = hints,
             subtitles = streamSubtitles.ifEmpty { null },
         )
+    }
+
+    /** ISO 639-1 language code -> flag emoji, or null when not a 2-letter code. */
+    private fun flagOf(code: String): String? {
+        val lang = code.trim().lowercase(Locale.ROOT)
+        if (lang.length != 2) return null
+        // 'en' has no single flag; GB is the conventional choice. Other codes map
+        // directly to their region-indicator (country) flag.
+        val letters = if (lang == "en") "gb" else lang
+        val a = letters[0].code - 'a'.code
+        val b = letters[1].code - 'a'.code
+        if (a !in 0..25 || b !in 0..25) return null
+        // Region indicator symbols U+1F1E6..U+1F1FF map to a..z.
+        return String(Character.toChars(0x1F1E6 + a)) + String(Character.toChars(0x1F1E6 + b))
     }
 }

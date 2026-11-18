@@ -93,6 +93,13 @@ class StreamMapperTest {
     @Test
     fun `name carries language and quality`() {
         val stream = map(link("https://a", quality = 0), language = "de")
-        assertEquals("CS DE ?", stream?.name)
+        assertEquals("CS 🇩🇪 ?", stream?.name)
+    }
+
+    @Test
+    fun `name shows a flag instead of the language code`() {
+        assertEquals("CS 🇩🇪 1080p", map(link("https://a"), language = "de")?.name)
+        assertEquals("CS 🇬🇧 1080p", map(link("https://a"), language = "en")?.name)
+        assertEquals("CS 🇫🇷 720p", map(link("https://a", quality = 720), language = "fr")?.name)
     }
 }
