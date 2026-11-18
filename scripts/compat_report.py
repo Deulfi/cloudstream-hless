@@ -4,8 +4,8 @@
     python3 scripts/compat_report.py --engine http://127.0.0.1:17171 --token TOKEN
         [--query "Inception"] [--out report.md] [--timeout 30]
 
-Talks to a running engine (docs/plans/1-container.md, "Run the engine
-alone"). Standard library only. Never prints URLs, headers or the token.
+Talks to a running engine (started on its own
+alone). Standard library only. Never prints URLs, headers or the token.
 """
 import argparse
 import json

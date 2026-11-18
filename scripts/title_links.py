@@ -8,10 +8,10 @@
 Use it to answer "why does the addon show fewer or worse streams than expected":
 without --probe it prints every link the engine returns (type, quality, source,
 header names, host); with --probe it also fetches each link the way the addon
-should (docs/plans/5b-link-probing.md) and prints facts; with --addon it adds
+should and prints facts; with --addon it adds
 the addon's own list for comparison.
 
-Talks to a running engine (see docs/plans/1-container.md, "Run the engine
+Talks to a running engine (see "Run the engine
 alone"). Standard library only. Never prints full URLs, header values or the
 token. The probe is a reference for the Kotlin implementation, not a tool for
 untrusted networks: it does not apply the address rules of 5b.
@@ -65,7 +65,7 @@ def fetch(url, headers, method="GET", byte_range=None, limit=600_000, timeout=4)
 
 
 def probe(link):
-    """One line of facts about a link. Rules mirror docs/plans/5b-link-probing.md."""
+    """One line of facts about a link. Rules mirror the addon."""
     url, headers = link["url"], link.get("headers") or {}
     if link["type"] == "M3U8":
         status, _, body, took = fetch(url, headers)

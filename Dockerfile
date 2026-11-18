@@ -14,6 +14,6 @@ ENTRYPOINT ["java", \
   "-XX:+UseSerialGC", "-XX:+ExitOnOutOfMemoryError", "-Dsun.net.inetaddr.ttl=600", "-Djava.awt.headless=true", \
   "-Dcs.cloudstream.home=/data", \
   "-cp", "/app/daemon.jar"]
-# The Stremio addon launcher (docs/plans/2a). Until it exists, run the engine
-# alone by overriding the command: com.lagradost.macos.MainKt <port> <token>
+# The Stremio addon launcher. To run the engine alone, override the command:
+# com.lagradost.macos.MainKt <port> <token>
 CMD ["com.lagradost.hless.HlessMainKt"]
