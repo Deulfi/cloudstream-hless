@@ -79,6 +79,26 @@ class BootstrapTest {
         override suspend fun pendingSolves(waitMs: Long): List<SolvePendingDto> = emptyList()
 
         override suspend fun completeSolve(taskId: String, targetUrl: String, cookies: String) {}
+
+        var autoUpdateFails = false
+        override suspend fun setAutoUpdate(enabled: Boolean) {
+            calls += "autoUpdate:$enabled"
+            if (autoUpdateFails) throw EngineException(500, null, "boom")
+        }
+    }
+
+    @Test
+    fun `bootstrap turns extension updates on, because the engine ships with them off`() = runBlocking {
+        val client = FakeClient()
+        bootstrap(client)
+        assertEquals(listOf("autoUpdate:true"), client.calls.take(1))
+    }
+
+    @Test
+    fun `bootstrap goes on when turning updates on fails`() = runBlocking {
+        val client = FakeClient().also { it.autoUpdateFails = true }
+        bootstrap(client)   // must not throw
+        assertEquals(listOf("autoUpdate:true"), client.calls)
     }
 
     @Test

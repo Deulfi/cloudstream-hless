@@ -1,5 +1,9 @@
 package com.lagradost.hless
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.security.SecureRandom
 
@@ -17,19 +21,23 @@ fun main() {
     val titles = TitleSource()
     Runtime.getRuntime().addShutdownHook(Thread({ HlessStores.shutdown() }, "hless-shutdown"))
 
-    runBlocking {
-        try {
-            client.awaitReady(timeoutMs = 120_000)
-        } catch (e: Exception) {
-            System.err.println("hless: engine not ready: ${e.message}")
-            kotlin.system.exitProcess(1)
-        }
-        println("hless: engine ready on 127.0.0.1:${Config.enginePort}")
-        Config.solverUrl?.let { url ->
-            println("hless: solver loop started ($url)")
-            SolverLoop(client, url).start(this)
-        }
-        bootstrap(client)
-        startAddonServer(StreamServiceImpl(client, titles), client)
+    try {
+        runBlocking { client.awaitReady(timeoutMs = 120_000) }
+    } catch (e: Exception) {
+        System.err.println("hless: engine not ready: ${e.message}")
+        kotlin.system.exitProcess(1)
     }
+    println("hless: engine ready on 127.0.0.1:${Config.enginePort}")
+
+    // Background work lives in its own scope: the addon server below blocks this thread,
+    // and a coroutine started in runBlocking could never run again once it does.
+    val background = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    Config.solverUrl?.let { url ->
+        println("hless: solver loop started ($url)")
+        SolverLoop(client, url).start(background)
+    }
+    // The server answers at once, also on a first start that still has extensions to
+    // install; those providers simply appear when they are ready.
+    background.launch { bootstrap(client) }
+    startAddonServer(StreamServiceImpl(client, titles), client)
 }

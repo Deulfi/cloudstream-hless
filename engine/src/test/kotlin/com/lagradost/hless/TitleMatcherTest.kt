@@ -39,6 +39,15 @@ class TitleMatcherTest {
     }
 
     @Test
+    fun `a sequel is not the film even when the provider gives no year`() {
+        val info = TitleInfo(listOf("Spider-Man"), 2002)
+        val sequel = SearchResultDto(name = "Spider-Man 2", url = "u", provider = "p", type = "Movie", year = null)
+        assertNull(pickMatch(info, "movie", listOf(sequel)))
+        val exact = SearchResultDto(name = "Spider-Man", url = "u2", provider = "p", type = "Movie", year = null)
+        assertEquals("u2", pickMatch(info, "movie", listOf(sequel, exact))?.url)
+    }
+
+    @Test
     fun `wrong type is discarded`() {
         val info = TitleInfo(listOf("Inception"), 2010)
         assertNull(pickMatch(info, "movie", listOf(result("Inception", "TvSeries", 2010))))

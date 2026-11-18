@@ -188,3 +188,29 @@ not one per setting.
 Managing repositories or extensions from the page, per-title overrides,
 accounts, and any setting that needs a secret. Those need a real
 authentication story first.
+
+## Review fixes (2026-11-18)
+
+A review of the whole addon found, and these commits fixed:
+
+- **Ids are signed.** An `hless:` id carries a provider and a page URL that goes
+  to the extension. It now ends in an HMAC (key in `<data>/hless/id.key`,
+  created once, mode 0600), and an id without a valid signature is refused. Ids
+  from before this change no longer work.
+- **Startup.** The addon server starts as soon as the engine answers;
+  bootstrap and the solver loop run in their own scope (a coroutine started in
+  `runBlocking` could never run again once the server blocked that thread).
+  `/healthz` answers 503 while the engine is not ready.
+- **Extension updates are turned on** at bootstrap (`/extensions/settings`),
+  because the engine ships with them off.
+- **A title found by TMDB is cached; one that fell back to Cinemeta because TMDB
+  failed is not.**
+- **A slow empty search is not remembered as "not there"** (the engine answers
+  `[]` for a failed search too); real misses are kept 10 minutes, not an hour.
+- **Fuzzy title matches need the same numbers** ("Spider-Man" no longer matches
+  "Spider-Man 2" when the provider gives no year).
+- **Finding the title takes no semaphore place**, only link extraction does;
+  at most 150 provider tasks run and 1000 finished ones are kept.
+- **Folding keeps a link whose quality the master does not have.**
+- **The cache files drop entries older than 31 days and are written on a
+  background thread.**

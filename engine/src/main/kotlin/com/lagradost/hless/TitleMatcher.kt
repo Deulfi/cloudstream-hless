@@ -54,7 +54,9 @@ fun pickMatch(
                 val target = normalize(name)
                 when {
                     normalized == target -> 70
-                    FuzzySearch.ratio(normalized, target) >= 92 -> 55
+                    // Similar spelling counts only when the numbers agree: "spiderman" is
+                    // 94% of "spiderman2", and a sequel is a different film.
+                    digitsOf(normalized) == digitsOf(target) && FuzzySearch.ratio(normalized, target) >= 92 -> 55
                     else -> null
                 }
             }
@@ -174,6 +176,8 @@ private fun pickByEpisode(pool: List<EpisodeDto>, episode: Int): EpisodeDto? {
         ?: candidates.firstOrNull { it.audio == null }
         ?: candidates.firstOrNull()
 }
+
+private fun digitsOf(text: String): String = text.filter { it.isDigit() }
 
 private val SEASON_N = Regex("""season (\d+)\s*$""")
 private val ORDINAL_SEASON = Regex("""(\d+)(?:st|nd|rd|th) season\s*$""")

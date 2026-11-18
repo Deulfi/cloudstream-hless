@@ -26,6 +26,10 @@ import kotlin.concurrent.withLock
 class JsonFileStore(
     private val file: File,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Entries older than this are dropped when the file is loaded and saved. */
+    private val maxAgeMs: Long = TimeUnit.DAYS.toMillis(31),
+    /** Write the file on a background thread, so a request never waits for the disk. */
+    private val background: Boolean = true,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val data = ConcurrentHashMap<String, JsonElement>()
@@ -40,6 +44,23 @@ class JsonFileStore(
                 for ((key, entry) in obj) data[key] = entry
             }
         }
+        sweep(clock())
+    }
+
+    private val saver by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+            Thread(task, "hless-store-save").apply { isDaemon = true }
+        }
+    }
+
+    private fun ageOf(entry: JsonElement, now: Long): Long {
+        val at = (entry as? JsonObject)?.get("at")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+        return now - at
+    }
+
+    /** Drops entries that no cache reads any more (expired ones were only ever ignored, never removed). */
+    private fun sweep(now: Long) {
+        data.entries.removeIf { ageOf(it.value, now) > maxAgeMs }
     }
 
     fun get(key: String): JsonElement? = data[key]
@@ -60,18 +81,29 @@ class JsonFileStore(
         lock.withLock {
             if (data.isNotEmpty() || lastSaveAt == 0L) saveNow()
         }
+        if (background) saver.shutdown()
     }
 
     private fun saveIfDue() {
-        lock.withLock {
-            val now = clock()
-            if (now - lastSaveAt >= 30_000) saveNow(now)
+        val now = clock()
+        val due = lock.withLock {
+            if (now - lastSaveAt < 30_000) false else { lastSaveAt = now; true }
+        }
+        if (!due) return
+        if (!background) { lock.withLock { saveNow(now) }; return }
+        try {
+            saver.execute {
+                try { lock.withLock { saveNow(now) } } catch (e: Exception) { println("hless: could not save ${file.name}: ${e.javaClass.simpleName}") }
+            }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            // closed: the final save already ran
         }
     }
 
     private fun saveNow(now: Long = clock()) {
         val parent = file.parentFile
         if (parent != null) parent.mkdirs()
+        sweep(now)
         val payload = buildJsonObject {
             for ((key, entry) in data) put(key, entry)
         }
@@ -96,7 +128,7 @@ class JsonFileStore(
 
 /**
  * Cache of resolved /links data per (imdb, providerId).
- * Hits last 30 days, misses 1 hour.
+ * Hits last 30 days, misses 10 minutes.
  */
 class MatchCache(
     private val store: JsonFileStore,
@@ -132,7 +164,7 @@ class MatchCache(
 
     companion object {
         private val HIT_TTL = TimeUnit.DAYS.toMillis(30)
-        private val MISS_TTL = TimeUnit.HOURS.toMillis(1)
+        private val MISS_TTL = TimeUnit.MINUTES.toMillis(10)
     }
 }
 

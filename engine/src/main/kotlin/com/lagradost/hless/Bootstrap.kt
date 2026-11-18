@@ -9,6 +9,13 @@ import kotlinx.coroutines.delay
  * stop the others; nothing is ever uninstalled here.
  */
 suspend fun bootstrap(client: EngineClient) {
+    // Installed extensions only get their fixes when the engine updates them itself
+    // (on every repository sync, and every 6 hours); it ships with that off.
+    try {
+        client.setAutoUpdate(true)
+    } catch (e: Exception) {
+        println("hless: could not turn on extension updates: ${e.javaClass.simpleName}")
+    }
     if (Config.repos.isEmpty()) {
         println("hless: no repositories configured")
         return

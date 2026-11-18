@@ -9,12 +9,12 @@ import kotlin.test.assertEquals
 
 class TitlesTest {
     @Test
-    fun `tmdb failure falls back to cinemeta`() = runBlocking {
-            val store = JsonFileStore(File(createTempDirectory("hless-titles").toString(), "titles.json"))
+    fun `a title without a tmdb key is cached from cinemeta`() = runBlocking {
+        val store = JsonFileStore(File(createTempDirectory("hless-titles").toString(), "titles.json"))
         val cinemetaCalls = AtomicInteger(0)
         val src = TitleSource(
             store = store,
-            tmdbKey = "k",
+            tmdbKey = null,
             langs = listOf("en"),
             tmdb = { _, _, _, _ -> null },
             cinemeta = { _, _ ->
@@ -23,10 +23,37 @@ class TitlesTest {
             },
         )
         assertEquals(TitleInfo(listOf("Cinemeta"), 2001), src.lookup("movie", "tt1"))
-        assertEquals(1, cinemetaCalls.get())
-        // cached: cinemeta is not called again
         assertEquals(TitleInfo(listOf("Cinemeta"), 2001), src.lookup("movie", "tt1"))
         assertEquals(1, cinemetaCalls.get())
+    }
+
+    @Test
+    fun `a tmdb failure falls back to cinemeta but is not remembered`() = runBlocking {
+        val store = JsonFileStore(File(createTempDirectory("hless-titles").toString(), "titles.json"))
+        val cinemetaCalls = AtomicInteger(0)
+        val tmdbCalls = AtomicInteger(0)
+        var tmdbWorks = false
+        val src = TitleSource(
+            store = store,
+            tmdbKey = "k",
+            langs = listOf("de", "en"),
+            tmdb = { _, _, _, _ ->
+                tmdbCalls.incrementAndGet()
+                if (tmdbWorks) TitleInfo(listOf("Deutsch", "English"), 2001, 120) else null
+            },
+            cinemeta = { _, _ ->
+                cinemetaCalls.incrementAndGet()
+                TitleInfo(listOf("English"), 2001)
+            },
+        )
+        assertEquals(TitleInfo(listOf("English"), 2001), src.lookup("movie", "tt1"))
+        // TMDB is back: the translated names are used at once, not after the cache expires.
+        tmdbWorks = true
+        assertEquals(TitleInfo(listOf("Deutsch", "English"), 2001, 120), src.lookup("movie", "tt1"))
+        assertEquals(2, tmdbCalls.get())
+        // and now they are cached
+        assertEquals(TitleInfo(listOf("Deutsch", "English"), 2001, 120), src.lookup("movie", "tt1"))
+        assertEquals(2, tmdbCalls.get())
     }
 
     @Test

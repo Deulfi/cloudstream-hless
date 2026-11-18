@@ -37,9 +37,13 @@ fun fold(items: List<Item>, keepVariants: Boolean): List<Item> {
         for (member in members) {
             if (member.index == keep.index) continue
             val facts = member.value.facts
+            // A variant is dropped when its quality is one the master offers. A link of a
+            // quality the master does not have (a separate 1080p next to a 720p master) stays.
+            val covered = knownHeight(member.value.link.quality)?.let { qualityClass(0, it) in heights }
             val drop = when (facts?.kind) {
-                Kind.MASTER, Kind.MEDIA -> true
-                null -> knownHeight(member.value.link.quality)?.let { it in heights } == true
+                Kind.MASTER -> true
+                Kind.MEDIA -> covered ?: heights.isNotEmpty()
+                null -> covered == true
                 else -> false
             }
             if (drop) dropped += member.index

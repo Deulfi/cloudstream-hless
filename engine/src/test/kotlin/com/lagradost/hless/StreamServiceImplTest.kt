@@ -148,6 +148,34 @@ class StreamServiceImplTest {
     }
 
     @Test
+    fun `providers stuck in their search never take the places the others need`() = runBlocking {
+        val stuck = (1..20).map { provider("stuck$it") }
+        val fake = FakeClient(
+            providers = stuck + provider("fast"),
+            searchDelayMs = stuck.associate { it.providerId to 60_000L },
+            links = mapOf("fast" to listOf(link("https://fast.example/stream"))),
+        )
+        val service = service(fake, deadlineMs = 10_000, minWaitMs = 300, quietMs = 300)
+        val result = service.streams("movie", "tt0000010", Settings())
+        assertEquals(listOf("https://fast.example/stream"), result.streams.map { it.url })
+    }
+
+    @Test
+    fun `new titles are refused while too many providers are running`() = runBlocking {
+        val many = (1..160).map { provider("p$it") }
+        val fake = FakeClient(
+            providers = many,
+            searchDelayMs = many.associate { it.providerId to 60_000L },
+        )
+        val service = service(fake, deadlineMs = 300, minWaitMs = 100, quietMs = 100)
+        service.streams("movie", "tt0000011", Settings())            // starts 160 tasks that stay running
+        val refused = service.streams("movie", "tt0000012", Settings())
+        assertEquals(0, refused.streams.size)
+        assertFalse(refused.complete)
+        assertEquals(null, fake.linkCalls["p1"])
+    }
+
+    @Test
     fun `when every provider is done the answer is complete and immediate`() = runBlocking {
         val fake = FakeClient(
             providers = listOf(provider("a"), provider("b")),

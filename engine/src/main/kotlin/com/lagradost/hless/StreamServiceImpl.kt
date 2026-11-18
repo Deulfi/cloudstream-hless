@@ -84,6 +84,12 @@ class StreamServiceImpl(
         val started = clock()
         if (id.startsWith("hless:")) return hlessStreams(id, settings)
         val parsedId = parseStremioId(type, id) ?: return StreamResult(emptyList(), true)
+        if (tasks.values.count { it.finishedAt == 0L } >= MAX_RUNNING) {
+            // Every distinct title starts work at every provider; without a bound a client
+            // asking for thousands of ids would exhaust memory and hammer the sites.
+            RateLimitedLog.log("overload", "hless: too many providers running, new titles are refused for now", 60_000L)
+            return StreamResult(emptyList(), false)
+        }
         if (settings.proxy && MediaFlow.configured()) MediaFlow.wake(scope)
         val kitsu = parsedId.kitsu != null
         val effectiveType = if (type == "anime") {
@@ -103,6 +109,7 @@ class StreamServiceImpl(
             hasType && askProvider(provider.name, settings.rank)
         }
         val wanted = providers.map { taskFor("$effectiveType/$id", it, effectiveType, parsedId, info) }
+        evictOldFinished()
         val complete = settle(wanted, started)
         val results = wanted.mapNotNull { it.result }
         val rendered = renderStreams(
@@ -144,6 +151,14 @@ class StreamServiceImpl(
         return StreamResult(rendered.streams, true)
     }
 
+    /** Keeps at most [MAX_TASKS] finished tasks, dropping the ones that finished longest ago. */
+    private fun evictOldFinished() {
+        val excess = tasks.size - MAX_TASKS
+        if (excess <= 0) return
+        tasks.entries.filter { it.value.finishedAt != 0L }.sortedBy { it.value.finishedAt }.take(excess)
+            .forEach { tasks.remove(it.key, it.value) }
+    }
+
     private fun isFresh(task: ProviderTask, now: Long): Boolean {
         if (task.finishedAt == 0L) return true
         val ttl = if (task.hasLinks) TASK_TTL else EMPTY_TTL
@@ -177,14 +192,15 @@ class StreamServiceImpl(
     ) {
         try {
             withTimeout(PROVIDER_TIMEOUT_MS) {
-                val response = semaphore.withPermit {
-                    val data = resolveData(client, provider.providerId, type, parsedId, info, timeoutMs = 20_000)
-                        ?: return@withPermit null
-                    task.matched = true
-                    task.phase = "links"
-                    task.lastActivityAt = clock()
-                    client.links(provider.providerId, data, budgetMs = 25_000)
-                } ?: return@withTimeout
+                // Finding the title is mostly waiting (a blocked site can wait for the solver for
+                // a minute), so it takes no permit: stuck providers must not starve the others.
+                // Only the link extraction, the heavy part, is limited.
+                val data = resolveData(client, provider.providerId, type, parsedId, info, timeoutMs = 20_000)
+                    ?: return@withTimeout
+                task.matched = true
+                task.phase = "links"
+                task.lastActivityAt = clock()
+                val response = semaphore.withPermit { client.links(provider.providerId, data, budgetMs = 25_000) }
                 // Publish the links at once, so a slow probe never costs a stream at the deadline.
                 task.phase = "probe"
                 publish(task, response.links.map { Item(it) }, response)
@@ -266,6 +282,8 @@ class StreamServiceImpl(
         private const val EMPTY_TTL = 30_000L
         private const val PROVIDER_TIMEOUT_MS = 45_000L
         private const val PROBE_BUDGET_MS = 4_000L
+        private const val MAX_RUNNING = 150
+        private const val MAX_TASKS = 1_000
         private const val POLL_MS = 100L
     }
 }

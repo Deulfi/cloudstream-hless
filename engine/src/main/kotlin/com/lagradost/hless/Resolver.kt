@@ -5,6 +5,9 @@ import com.lagradost.macos.models.SearchResultDto
 
 private val defaultCache = MatchCache(HlessStores.matchStore)
 
+/** A search that took this long and found nothing probably failed; do not cache it as a miss. */
+private const val SLOW_SEARCH_MS = 6_000L
+
 /**
  * Resolves the /links data string for one (provider, title), 2d step 3:
  * search (at most the first two names) -> pickMatch -> cache -> details ->
@@ -32,6 +35,7 @@ suspend fun resolveData(
     var matchName: String? = null
     val url: String? = when (val hit = cache.lookup(key, providerId)) {
         is MatchCache.Entry.Absent -> {
+            val searchStarted = System.nanoTime()
             var match: SearchResultDto? = null
             for (name in info.names.take(2)) {
                 val results = client.search(providerId, name, timeoutMs)
@@ -45,7 +49,10 @@ suspend fun resolveData(
                 matchName = match.name
                 match.url
             } else {
-                cache.store(key, providerId, null)
+                // The engine answers an empty list both for "the site does not have it" and
+                // for a search that failed (blocked, down, timed out). A failure is slow, so
+                // a slow empty answer is not remembered as "not there".
+                if ((System.nanoTime() - searchStarted) / 1_000_000 < SLOW_SEARCH_MS) cache.store(key, providerId, null)
                 null
             }
         }

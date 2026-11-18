@@ -67,6 +67,12 @@ interface EngineClient {
     suspend fun plugins(timeoutMs: Long = 30_000): List<PluginDto>
 
     /** Long-polls parked Cloudflare challenge tasks (GET /solve/pending). */
+    /**
+     * POST /extensions/settings `{"autoUpdate": enabled}`. The engine ships with it off, and
+     * then a repository re-sync never applies an extension's fix. Default: do nothing.
+     */
+    suspend fun setAutoUpdate(enabled: Boolean) {}
+
     suspend fun pendingSolves(waitMs: Long): List<SolvePendingDto>
 
     /** Hands solved cookies back to the engine (POST /solve-callback). */
@@ -218,6 +224,16 @@ class OkHttpEngineClient(
         ) {
             json.decodeFromString<List<SolvePendingDto>>(it)
         }
+
+    override suspend fun setAutoUpdate(enabled: Boolean) {
+        request(
+            "POST",
+            "/extensions/settings",
+            body = """{"autoUpdate":$enabled}""",
+            timeoutMs = 30_000,
+        ) {
+        }
+    }
 
     override suspend fun completeSolve(taskId: String, targetUrl: String, cookies: String) {
         request(

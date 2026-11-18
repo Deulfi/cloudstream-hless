@@ -259,6 +259,31 @@ class AddonServerTest {
     }
 
     @Test
+    fun `an id this server did not sign is refused before any extension sees its url`() {
+        val engine = FakeClient(details = DetailsDto(provider = "a", url = "x", name = "n", type = "Movie"))
+        val real = HlessId("a", "https://a/m1").encode()
+        val forged = "hless:" + HlessId.b64url("a") + ":" + HlessId.b64url("http://10.0.0.1/admin") + ":" + real.split(":").last()
+        val unsigned = "hless:" + HlessId.b64url("a") + ":" + HlessId.b64url("http://10.0.0.1/admin")
+        testApplication {
+            application { addonModule(RecordingService(), engine, null) }
+            assertEquals(HttpStatusCode.OK, client.get("/meta/movie/$real.json").status)
+            assertEquals(HttpStatusCode.BadRequest, client.get("/meta/movie/$forged.json").status)
+            assertEquals(HttpStatusCode.BadRequest, client.get("/meta/movie/$unsigned.json").status)
+        }
+    }
+
+    @Test
+    fun `healthz says no while the engine is down`() {
+        var engineUp = true
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), null, healthy = { engineUp }) }
+            assertEquals(HttpStatusCode.OK, client.get("/healthz").status)
+            engineUp = false
+            assertEquals(HttpStatusCode.ServiceUnavailable, client.get("/healthz").status)
+        }
+    }
+
+    @Test
     fun `a partial answer is not cached`() {
         val service = RecordingService(listOf(StremioStream("n", "d", "https://cdn.example/a.mp4")), complete = false)
         testApplication {

@@ -57,6 +57,7 @@ fun Application.addonModule(
     secret: String?,
     defaults: Settings = Settings(),
     server: ServerInfo = ServerInfo(),
+    healthy: suspend () -> Boolean = { true },
 ) {
     install(ContentNegotiation) { json(addonJson) }
     intercept(ApplicationCallPipeline.Plugins) {
@@ -69,7 +70,10 @@ fun Application.addonModule(
     routing {
         // Stremio sends a bare OPTIONS probe before each GET; answer 204 to all.
         options("/{path...}") { call.respond(HttpStatusCode.NoContent) }
-        get("/healthz") { call.respondText("ok") }
+        // 200 only while the engine behind the addon answers, so a supervisor can restart a dead one.
+        get("/healthz") {
+            if (healthy()) call.respondText("ok") else call.respondText("engine not ready", status = HttpStatusCode.ServiceUnavailable)
+        }
         val mount: Route.() -> Unit = {
             get("/manifest.json") {
                 val settings = call.settings(defaults)
@@ -319,6 +323,9 @@ fun startAddonServer(service: StreamService, client: EngineClient) {
             service, client, Config.secret,
             defaults = Settings.fromConfig(),
             server = ServerInfo(mediaflow = MediaFlow.configured(), publicUrl = Config.publicUrl),
+            healthy = {
+                runCatching { client.health().extensions.phase in setOf("ready", "safe_mode") }.getOrDefault(false)
+            },
         )
     }.start(wait = true)
 }

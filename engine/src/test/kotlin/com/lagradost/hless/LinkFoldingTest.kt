@@ -21,7 +21,7 @@ class LinkFoldingTest {
         media("https://cdn.example/v800.m3u8", 800),
         media("https://cdn.example/v720.m3u8", 720),
         media("https://cdn.example/v480.m3u8", 480),
-        master("https://cdn.example/master.m3u8", listOf(800, 720, 480)),
+        master("https://cdn.example/master.m3u8", listOf(1080, 720, 480)),
         Item(link("https://cdn2.example/f.mp4", 400, "Voe MP4", "VIDEO"), LinkFacts(Kind.FILE, sizeBytes = 1_010_000_000L)),
     )
 
@@ -44,11 +44,31 @@ class LinkFoldingTest {
     @Test
     fun `an unprobed variant is dropped only if its height is one of the master's`() {
         val items = listOf(
-            master("https://cdn.example/m.m3u8", listOf(800, 720)),
+            master("https://cdn.example/m.m3u8", listOf(1080, 720)),
             Item(link("https://cdn.example/a.m3u8", 720, "Voe"), null),
             Item(link("https://cdn.example/b.m3u8", 480, "Voe"), null),
         )
         assertEquals(listOf("https://cdn.example/m.m3u8", "https://cdn.example/b.m3u8"), urls(fold(items, false)))
+    }
+
+    @Test
+    fun `a separate link of a quality the master does not have is kept`() {
+        val items = listOf(
+            master("https://cdn.example/m.m3u8", listOf(720)),
+            media("https://cdn.example/v720.m3u8", 720),
+            media("https://cdn.example/v1080.m3u8", 1080),
+        )
+        assertEquals(listOf("https://cdn.example/m.m3u8", "https://cdn.example/v1080.m3u8"), urls(fold(items, false)))
+    }
+
+    @Test
+    fun `a master without resolutions folds nothing it cannot match`() {
+        val items = listOf(
+            Item(link("https://cdn.example/m.m3u8", 400, "Voe"), LinkFacts(Kind.MASTER)),
+            media("https://cdn.example/v720.m3u8", 720),
+            media("https://cdn.example/unknown.m3u8", 400),
+        )
+        assertEquals(urls(items), urls(fold(items, false)))
     }
 
     @Test

@@ -39,12 +39,18 @@ class TitleSource(
             if (System.currentTimeMillis() - at < TTL) titleInfoFrom(entry) else null
         }
         if (cached != null) return cached
-        val info = if (tmdbKey != null && !Tmdb.isRejected()) {
-            tmdb(type, imdb, tmdbKey, langs)
-        } else null
-        val resolved = info ?: cinemeta(type, imdb) ?: return null
-        store.put(key, titleInfoJson(resolved))
-        return resolved
+        val askedTmdb = tmdbKey != null && !Tmdb.isRejected()
+        val info = if (askedTmdb) tmdb(type, imdb, tmdbKey!!, langs) else null
+        if (info != null) {
+            store.put(key, titleInfoJson(info))
+            return info
+        }
+        val fallback = cinemeta(type, imdb) ?: return null
+        // The English-only fallback is kept only when TMDB was not an option. If TMDB
+        // was asked and failed, a bad moment must not leave the title without its
+        // translated names for a month.
+        if (!askedTmdb) store.put(key, titleInfoJson(fallback))
+        return fallback
     }
 
     companion object {

@@ -12,8 +12,8 @@ class HlessIdTest {
         val id = HlessId("inst:prov", "https://example.com/a:b/c?d=e&f=g#h")
         val encoded = id.encode()
         assertEquals(id, HlessId.decode(encoded))
-        // exactly the one separator between the two segments
-        assertEquals(1, encoded.removePrefix("hless:").count { it == ':' })
+        // provider, url and signature: two separators
+        assertEquals(2, encoded.removePrefix("hless:").count { it == ':' })
     }
 
     @Test
@@ -31,6 +31,22 @@ class HlessIdTest {
                 "unexpected $ch in $encoded",
             )
         }
+    }
+
+    @Test
+    fun `an id this server did not sign does not decode`() {
+        val good = HlessId("prov", "https://example.com/x").encode()
+        val parts = good.split(":")
+        // an unsigned id of the old shape
+        assertNull(HlessId.decode("hless:" + parts[1] + ":" + parts[2]))
+        // a made-up URL under a real signature
+        val forged = "hless:" + parts[1] + ":" + HlessId.b64url("http://10.0.0.1/admin") + ":" + parts[3]
+        assertNull(HlessId.decode(forged))
+        // a signature from another body, an empty one, a tampered season
+        assertNull(HlessId.decode("hless:" + parts[1] + ":" + parts[2] + ":AAAAAAAAAAAAAAAAAAAAAA"))
+        assertNull(HlessId.decode("hless:" + parts[1] + ":" + parts[2] + ":"))
+        val episode = HlessId("prov", "https://example.com/x", 1, 2).encode().split(":")
+        assertNull(HlessId.decode("hless:${episode[1]}:${episode[2]}:1:3:${episode[5]}"))
     }
 
     @Test
