@@ -21,13 +21,60 @@ class ConfigTest {
         assertEquals(null, config.tmdbKey)
         assertEquals(listOf("en"), config.langs)
         assertEquals(0, config.minQuality)
-        assertEquals(4, config.maxPerProvider)
-        assertEquals(30, config.maxStreams)
+        assertEquals(6, config.maxPerProvider)
+        assertEquals(40, config.maxStreams)
         assertEquals(emptyList(), config.providersDeny)
         assertEquals(emptyList(), config.providersAllow)
         assertEquals(emptyList(), config.providersFirst)
         assertEquals(null, config.solverUrl)
         assertEquals(60_000L, config.solverTimeoutMs)
+        assertEquals(600_000L, config.solverCooldownMs)
+        assertEquals(0, config.solverConcurrency)
+        assertEquals("hless", config.label)
+        assertEquals(FlagMode.EMOJI, config.flags)
+        assertEquals(true, config.icons)
+        assertEquals(Variants.FOLD, config.variants)
+        assertEquals(0, config.maxQuality)
+        assertEquals(SortMode.LANG, config.sort)
+        assertEquals(4_000L, config.minWaitMs)
+        assertEquals(2_000L, config.quietMs)
+    }
+
+    @Test
+    fun `display and ordering options parse`() {
+        val config = ConfigValues(
+            mapOf(
+                "HLESS_LABEL" to "mine",
+                "HLESS_FLAGS" to "CODE",
+                "HLESS_ICONS" to "false",
+                "HLESS_VARIANTS" to "all",
+                "HLESS_SORT" to "size",
+                "HLESS_MAX_QUALITY" to "1080",
+                "HLESS_MIN_WAIT_MS" to "1000",
+                "HLESS_QUIET_MS" to "500",
+            ),
+        )
+        assertEquals("mine", config.label)
+        assertEquals(FlagMode.CODE, config.flags)
+        assertEquals(false, config.icons)
+        assertEquals(Variants.ALL, config.variants)
+        assertEquals(SortMode.SIZE, config.sort)
+        assertEquals(1080, config.maxQuality)
+        assertEquals(1_000L, config.minWaitMs)
+        assertEquals(500L, config.quietMs)
+    }
+
+    @Test
+    fun `an unknown option value is a startup error naming the variable`() {
+        for (env in listOf(
+            mapOf("HLESS_FLAGS" to "banana"),
+            mapOf("HLESS_SORT" to "random"),
+            mapOf("HLESS_VARIANTS" to "some"),
+            mapOf("HLESS_ICONS" to "maybe"),
+        )) {
+            val failure = assertFailsWith<IllegalStateException> { ConfigValues(env) }
+            assertEquals(true, failure.message!!.contains(env.keys.single()))
+        }
     }
 
     @Test

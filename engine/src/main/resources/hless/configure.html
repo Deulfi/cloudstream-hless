@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hless configuration</title>
+<style>
+  :root {
+    --bg: #f6f6f8; --card: #ffffff; --fg: #1b1b1f; --muted: #62626b; --line: #dcdce3;
+    --accent: #5b3df5; --accent-fg: #ffffff; --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101014; --card: #1a1a20; --fg: #ececf1; --muted: #9a9aa6; --line: #2e2e38;
+      --accent: #8d79ff; --accent-fg: #101014; --field: #121217;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 16px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 0 0 14px; }
+  h2 { font-size: 1rem; margin: 0 0 4px; }
+  p.hint { color: var(--muted); font-size: .875rem; margin: 0 0 10px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+  .row > label { min-width: 7.5rem; }
+  select, input[type=number], input[type=text] {
+    background: var(--field); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font: inherit; min-width: 0;
+  }
+  input[type=number] { width: 6rem; }
+  button {
+    background: var(--field); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  ul.list li:first-child { border-top: 0; }
+  ul.list .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .tag { color: var(--muted); font-size: .8rem; }
+  .off .name { opacity: .5; }
+  #url { width: 100%; font-family: ui-monospace, monospace; font-size: .8rem; }
+  #notice { color: var(--muted); }
+  a.button { display: inline-block; text-decoration: none; padding: 6px 10px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); }
+</style>
+</head>
+<body>
+<main>
+  <h1>hless configuration</h1>
+  <p class="lead">Your choices are stored in the addon link below, not on the server. Install that link in Stremio.</p>
+  <p id="notice">Loading…</p>
+
+  <section>
+    <h2>Languages</h2>
+    <p class="hint">Providers in the first language are listed first.</p>
+    <ul class="list" id="langs"></ul>
+    <div class="row">
+      <input type="text" id="lang-new" placeholder="code, e.g. de" maxlength="3" size="8" aria-label="Language code">
+      <button type="button" id="lang-add">Add</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Resolution</h2>
+    <p class="hint">Streams without a known resolution are always kept.</p>
+    <div class="row"><label for="minH">At least</label><select id="minH"></select></div>
+    <div class="row"><label for="maxH">At most</label><select id="maxH"></select></div>
+  </section>
+
+  <section>
+    <h2>Providers</h2>
+    <p class="hint">Switch providers off, or pin the ones that should always come first.</p>
+    <ul class="list" id="providers"></ul>
+  </section>
+
+  <section>
+    <h2>Sorting and limits</h2>
+    <div class="row"><label for="sort">Sort by</label>
+      <select id="sort">
+        <option value="lang">Language, then quality</option>
+        <option value="quality">Quality, then language</option>
+        <option value="provider">Provider</option>
+        <option value="size">File size</option>
+      </select></div>
+    <div class="row"><label for="perProv">Per provider</label><input type="number" id="perProv" min="1" max="20"></div>
+    <div class="row"><label for="total">In total</label><input type="number" id="total" min="1" max="100"></div>
+  </section>
+
+  <section>
+    <h2>Appearance</h2>
+    <div class="row"><label for="variants">Quality variants</label>
+      <select id="variants">
+        <option value="fold">One entry per source</option>
+        <option value="all">List every variant</option>
+      </select></div>
+    <div class="row"><label for="flags">Language</label>
+      <select id="flags">
+        <option value="emoji">Flag</option>
+        <option value="code">Letters (DE)</option>
+        <option value="none">Hidden</option>
+      </select></div>
+    <div class="row"><label for="icons">Icons</label><input type="checkbox" id="icons"></div>
+  </section>
+
+  <section id="proxy-section" hidden>
+    <h2>Proxy</h2>
+    <p class="hint">Send streams through the server's MediaFlow proxy. Most streams need it to play outside the desktop apps.</p>
+    <div class="row"><label for="proxy">Use MediaFlow</label><input type="checkbox" id="proxy"></div>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <p class="hint">Copy this link into Stremio's addon search box, or open it directly.</p>
+    <input type="text" id="url" readonly aria-label="Addon link">
+    <div class="row">
+      <button type="button" class="primary" id="copy">Copy</button>
+      <a class="button" id="open" href="#">Open in Stremio</a>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var HEIGHTS = [0, 360, 480, 720, 1080, 2160];
+
+  var m = location.pathname.match(/^(.*?)(?:\/c~([A-Za-z0-9_-]+))?\/configure\/?$/);
+  var base = m ? m[1] : '';
+  var server = null, providers = [], st = null;
+
+  function b64urlEncode(text) {
+    var bytes = new TextEncoder().encode(text), s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64urlDecode(seg) {
+    var s = seg.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    var raw = atob(s), bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+  function text(tag, value, cls) {
+    var e = document.createElement(tag);
+    e.textContent = value;
+    if (cls) e.className = cls;
+    return e;
+  }
+  function button(label, title, onclick) {
+    var b = text('button', label);
+    b.type = 'button';
+    b.title = title;
+    b.addEventListener('click', onclick);
+    return b;
+  }
+  function move(list, i, d) {
+    var j = i + d;
+    if (j < 0 || j >= list.length) return;
+    var t = list[i]; list[i] = list[j]; list[j] = t;
+  }
+
+  function initState() {
+    var d = server.defaults, saved = {};
+    if (m && m[2]) { try { saved = b64urlDecode(m[2]) || {}; } catch (e) { saved = {}; } }
+    function pick(k) { return saved[k] !== undefined ? saved[k] : d[k]; }
+    st = {
+      langs: (pick('langs') || []).slice(),
+      minH: pick('minH'), maxH: pick('maxH'),
+      first: (pick('first') || []).slice(),
+      off: (saved.off || []).slice(),
+      sort: pick('sort'), perProv: pick('perProv'), total: pick('total'),
+      variants: pick('variants'), flags: pick('flags'), icons: pick('icons'), proxy: pick('proxy')
+    };
+  }
+
+  function fillHeights(select, value) {
+    select.textContent = '';
+    HEIGHTS.forEach(function (h) {
+      var o = document.createElement('option');
+      o.value = String(h);
+      o.textContent = h === 0 ? 'Any' : h + 'p';
+      select.appendChild(o);
+    });
+    if (HEIGHTS.indexOf(value) < 0) {
+      var extra = document.createElement('option');
+      extra.value = String(value); extra.textContent = value + 'p';
+      select.appendChild(extra);
+    }
+    select.value = String(value);
+  }
+
+  function renderLangs() {
+    var ul = $('langs'); ul.textContent = '';
+    st.langs.forEach(function (code, i) {
+      var li = document.createElement('li');
+      li.appendChild(text('span', code.toUpperCase(), 'name'));
+      li.appendChild(button('▲', 'Move up', function () { move(st.langs, i, -1); changed(); renderLangs(); }));
+      li.appendChild(button('▼', 'Move down', function () { move(st.langs, i, 1); changed(); renderLangs(); }));
+      li.appendChild(button('✕', 'Remove', function () { st.langs.splice(i, 1); changed(); renderLangs(); }));
+      ul.appendChild(li);
+    });
+  }
+
+  function renderProviders() {
+    var ul = $('providers'); ul.textContent = '';
+    var names = providers.map(function (p) { return p.name; });
+    var pinned = st.first.filter(function (n) { return names.indexOf(n) >= 0; });
+    var rest = providers.filter(function (p) { return pinned.indexOf(p.name) < 0; })
+                        .sort(function (a, b) { return a.name.localeCompare(b.name); });
+    var ordered = pinned.map(function (n) { return providers.filter(function (p) { return p.name === n; })[0]; }).concat(rest);
+    ordered.forEach(function (p) {
+      var li = document.createElement('li');
+      var on = st.off.indexOf(p.name) < 0;
+      if (!on) li.className = 'off';
+      var box = document.createElement('input');
+      box.type = 'checkbox'; box.checked = on; box.title = 'Ask this provider';
+      box.setAttribute('aria-label', 'Ask ' + p.name);
+      box.addEventListener('change', function () {
+        var i = st.off.indexOf(p.name);
+        if (box.checked && i >= 0) st.off.splice(i, 1);
+        if (!box.checked && i < 0) st.off.push(p.name);
+        changed(); renderProviders();
+      });
+      li.appendChild(box);
+      var label = text('span', p.name, 'name');
+      var meta = [p.language, (p.types || []).join(', ')].filter(Boolean).join(' · ');
+      if (meta) label.appendChild(text('span', '  ' + meta, 'tag'));
+      li.appendChild(label);
+      var pi = st.first.indexOf(p.name);
+      if (pi >= 0) {
+        li.appendChild(button('▲', 'Move up', function () { move(st.first, pi, -1); changed(); renderProviders(); }));
+        li.appendChild(button('▼', 'Move down', function () { move(st.first, pi, 1); changed(); renderProviders(); }));
+      }
+      li.appendChild(button(pi >= 0 ? '★' : '☆', pi >= 0 ? 'Unpin' : 'Always first', function () {
+        if (pi >= 0) st.first.splice(pi, 1); else st.first.push(p.name);
+        changed(); renderProviders();
+      }));
+      ul.appendChild(li);
+    });
+  }
+
+  function prefs() {
+    var d = server.defaults, out = {};
+    if (!same(st.langs, d.langs) && st.langs.length) out.langs = st.langs;
+    if (st.minH !== d.minH) out.minH = st.minH;
+    if (st.maxH !== d.maxH) out.maxH = st.maxH;
+    var off = st.off.filter(function (n) { return providers.some(function (p) { return p.name === n; }); });
+    if (off.length) out.off = off;
+    if (!same(st.first, d.first)) out.first = st.first;
+    ['sort', 'perProv', 'total', 'variants', 'flags', 'icons'].forEach(function (k) { if (st[k] !== d[k]) out[k] = st[k]; });
+    if (server.mediaflow && st.proxy !== d.proxy) out.proxy = st.proxy;
+    return out;
+  }
+
+  function changed() {
+    var p = prefs(), seg = Object.keys(p).length ? '/c~' + b64urlEncode(JSON.stringify(p)) : '';
+    var origin = server.publicUrl || location.origin;
+    var url = origin + base + seg + '/manifest.json';
+    $('url').value = url;
+    $('open').href = url.replace(/^https?:\/\//, 'stremio://');
+  }
+
+  function bind() {
+    fillHeights($('minH'), st.minH); fillHeights($('maxH'), st.maxH);
+    $('minH').addEventListener('change', function () { st.minH = parseInt(this.value, 10); changed(); });
+    $('maxH').addEventListener('change', function () { st.maxH = parseInt(this.value, 10); changed(); });
+    ['sort', 'variants', 'flags'].forEach(function (k) {
+      $(k).value = st[k];
+      $(k).addEventListener('change', function () { st[k] = this.value; changed(); });
+    });
+    ['perProv', 'total'].forEach(function (k) {
+      $(k).value = st[k];
+      $(k).addEventListener('input', function () {
+        var v = parseInt(this.value, 10);
+        if (!isNaN(v)) { st[k] = Math.max(+this.min, Math.min(+this.max, v)); changed(); }
+      });
+    });
+    $('icons').checked = !!st.icons;
+    $('icons').addEventListener('change', function () { st.icons = this.checked; changed(); });
+    if (server.mediaflow) {
+      $('proxy-section').hidden = false;
+      $('proxy').checked = !!st.proxy;
+      $('proxy').addEventListener('change', function () { st.proxy = this.checked; changed(); });
+    }
+    $('lang-add').addEventListener('click', function () {
+      var v = $('lang-new').value.trim().toLowerCase();
+      if (/^[a-z]{2,3}$/.test(v) && st.langs.indexOf(v) < 0) { st.langs.push(v); $('lang-new').value = ''; changed(); renderLangs(); }
+    });
+    $('copy').addEventListener('click', function () {
+      var input = $('url'); input.select();
+      var done = function () { $('copy').textContent = 'Copied'; setTimeout(function () { $('copy').textContent = 'Copy'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(input.value).then(done, function () { document.execCommand('copy'); done(); });
+      else { document.execCommand('copy'); done(); }
+    });
+  }
+
+  function get(path) {
+    return fetch(base + path, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  Promise.all([get('/api/server'), get('/api/providers')]).then(function (res) {
+    server = res[0]; providers = res[1];
+    initState(); bind(); renderLangs(); renderProviders(); changed();
+    $('notice').textContent = providers.length ? '' : 'The server has no providers installed yet.';
+  }).catch(function (e) {
+    $('notice').textContent = 'Could not load the server settings (' + e.message + ').';
+  });
+})();
+</script>
+</body>
+</html>

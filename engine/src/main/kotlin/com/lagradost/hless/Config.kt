@@ -25,6 +25,16 @@ class ConfigValues(env: Map<String, String>) {
     val animeAudio: String
     val solverUrl: String?
     val solverTimeoutMs: Long
+    val solverCooldownMs: Long
+    val solverConcurrency: Int
+    val label: String
+    val flags: FlagMode
+    val icons: Boolean
+    val variants: Variants
+    val maxQuality: Int
+    val sort: SortMode
+    val minWaitMs: Long
+    val quietMs: Long
 
     init {
         port = intVar(env, "HLESS_PORT", 7000)
@@ -39,14 +49,45 @@ class ConfigValues(env: Map<String, String>) {
         tmdbKey = strVar(env, "HLESS_TMDB_KEY")
         langs = listVar(env, "HLESS_LANGS", listOf("en"))
         minQuality = intVar(env, "HLESS_MIN_QUALITY", 0)
-        maxPerProvider = intVar(env, "HLESS_MAX_PER_PROVIDER", 4)
-        maxStreams = intVar(env, "HLESS_MAX_STREAMS", 30)
+        maxPerProvider = intVar(env, "HLESS_MAX_PER_PROVIDER", 6)
+        maxStreams = intVar(env, "HLESS_MAX_STREAMS", 40)
         providersDeny = listVar(env, "HLESS_PROVIDERS_DENY", emptyList())
         providersAllow = listVar(env, "HLESS_PROVIDERS_ALLOW", emptyList())
         providersFirst = listVar(env, "HLESS_PROVIDERS_FIRST", emptyList())
         animeAudio = strVar(env, "HLESS_ANIME_AUDIO") ?: "sub"
         solverUrl = strVar(env, "HLESS_SOLVER_URL")?.let(::stripTrailingSlash)
         solverTimeoutMs = longVar(env, "HLESS_SOLVER_TIMEOUT_MS", 60_000)
+        solverCooldownMs = longVar(env, "HLESS_SOLVER_COOLDOWN_MS", 600_000)
+        // 0 = ask the solver how many it can run at once (its /health), else 2.
+        solverConcurrency = intVar(env, "HLESS_SOLVER_CONCURRENCY", 0)
+        label = strVar(env, "HLESS_LABEL")?.take(20) ?: "hless"
+        flags = enumVar(env, "HLESS_FLAGS", FlagMode.EMOJI, FlagMode::parse, "emoji, code or none")
+        icons = boolVar(env, "HLESS_ICONS", true)
+        variants = enumVar(env, "HLESS_VARIANTS", Variants.FOLD, Variants::parse, "fold or all")
+        maxQuality = intVar(env, "HLESS_MAX_QUALITY", 0)
+        sort = enumVar(env, "HLESS_SORT", SortMode.LANG, SortMode::parse, "lang, quality, provider or size")
+        minWaitMs = longVar(env, "HLESS_MIN_WAIT_MS", 4_000)
+        quietMs = longVar(env, "HLESS_QUIET_MS", 2_000)
+    }
+
+    private fun boolVar(env: Map<String, String>, name: String, default: Boolean): Boolean {
+        val value = raw(env, name)?.lowercase() ?: return default
+        return when (value) {
+            "true", "1", "yes", "on" -> true
+            "false", "0", "no", "off" -> false
+            else -> error("$name must be true or false, got '$value'")
+        }
+    }
+
+    private fun <T> enumVar(
+        env: Map<String, String>,
+        name: String,
+        default: T,
+        parse: (String?) -> T?,
+        allowed: String,
+    ): T {
+        val value = raw(env, name) ?: return default
+        return parse(value) ?: error("$name must be $allowed, got '$value'")
     }
 
     private fun raw(env: Map<String, String>, name: String): String? =
@@ -96,4 +137,14 @@ object Config {
     val animeAudio: String get() = values.animeAudio
     val solverUrl: String? get() = values.solverUrl
     val solverTimeoutMs: Long get() = values.solverTimeoutMs
+    val solverCooldownMs: Long get() = values.solverCooldownMs
+    val solverConcurrency: Int get() = values.solverConcurrency
+    val label: String get() = values.label
+    val flags: FlagMode get() = values.flags
+    val icons: Boolean get() = values.icons
+    val variants: Variants get() = values.variants
+    val maxQuality: Int get() = values.maxQuality
+    val sort: SortMode get() = values.sort
+    val minWaitMs: Long get() = values.minWaitMs
+    val quietMs: Long get() = values.quietMs
 }

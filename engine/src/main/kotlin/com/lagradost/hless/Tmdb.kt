@@ -62,7 +62,11 @@ object Tmdb {
         val unique = names.filter { seen.add(normalize(it)) }
         if (unique.isEmpty()) return null
         val year = date?.takeIf { it.length >= 4 }?.take(4)?.toIntOrNull()
-        return TitleInfo(unique.take(4), year)
+        // The detail response carries the movie's runtime; a series has no single one.
+        val runtime = if (type == "movie") {
+            (translations as? JsonObject)?.get("runtime")?.jsonPrimitive?.content?.toIntOrNull()?.takeIf { it > 0 }
+        } else null
+        return TitleInfo(unique.take(4), year, runtime)
     }
     /** Pure: the TMDB id of the first find result, or null when TMDB has no entry. */
     fun findId(type: String, find: JsonElement?): Int? {

@@ -17,6 +17,8 @@ data class StreamHints(
     val notWebReady: Boolean? = null,
     val bingeGroup: String? = null,
     val proxyHeaders: ProxyHeaders? = null,
+    /** Bytes, when a probe learned the size (Stremio uses it for subtitle matching and display). */
+    val videoSize: Long? = null,
 )
 
 @Serializable

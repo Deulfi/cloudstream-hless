@@ -77,4 +77,16 @@ class TmdbTest {
         assertEquals(listOf("Matrix", "The Matrix"), info?.names)
         assertEquals(1999, info?.year)
     }
+
+    @Test
+    fun `a movie's runtime is read from the detail response, zero and series give none`() {
+        val movie = json.parseToJsonElement(
+            """{"movie_results":[{"id":1,"title":"A","original_title":"A","release_date":"2026-07-29"}]}""",
+        )
+        assertEquals(150, Tmdb.buildNames("movie", movie, json.parseToJsonElement("""{"runtime":150,"translations":{"translations":[]}}"""), listOf("en"))?.runtimeMin)
+        assertNull(Tmdb.buildNames("movie", movie, json.parseToJsonElement("""{"runtime":0,"translations":{"translations":[]}}"""), listOf("en"))?.runtimeMin)
+        assertNull(Tmdb.buildNames("movie", movie, json.parseToJsonElement("""{"translations":{"translations":[]}}"""), listOf("en"))?.runtimeMin)
+        val series = json.parseToJsonElement("""{"tv_results":[{"id":2,"name":"S","original_name":"S","first_air_date":"2020-01-01"}]}""")
+        assertNull(Tmdb.buildNames("series", series, json.parseToJsonElement("""{"runtime":45,"translations":{"translations":[]}}"""), listOf("en"))?.runtimeMin)
+    }
 }

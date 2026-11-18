@@ -11,8 +11,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.concurrent.TimeUnit
 
-/** The names of a title, most useful first, and its year. */
-data class TitleInfo(val names: List<String>, val year: Int?)
+/** The names of a title, most useful first, its year and, for a movie, its runtime in minutes when TMDB knows it. */
+data class TitleInfo(val names: List<String>, val year: Int?, val runtimeMin: Int? = null)
 
 /** Name lookup for one (type, imdb) pair. */
 interface TitleLookup {
@@ -32,7 +32,8 @@ class TitleSource(
 ) : TitleLookup {
 
     override suspend fun lookup(type: String, imdb: String): TitleInfo? {
-        val key = "$type|$imdb|${langs.joinToString(",")}"
+        // v2: entries carry the runtime (5b); older ones have none.
+        val key = "v2|$type|$imdb|${langs.joinToString(",")}"
         val cached = store.get(key)?.let { entry ->
             val at = (entry as? JsonObject)?.get("at")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
             if (System.currentTimeMillis() - at < TTL) titleInfoFrom(entry) else null
@@ -55,11 +56,13 @@ class TitleSource(
 fun titleInfoJson(info: TitleInfo): JsonObject = buildJsonObject {
     put("names", JsonArray(info.names.map { JsonPrimitive(it) }))
     put("year", info.year?.let { JsonPrimitive(it) } ?: JsonNull)
+    put("runtimeMin", info.runtimeMin?.let { JsonPrimitive(it) } ?: JsonNull)
 }
 
 fun titleInfoFrom(entry: JsonElement): TitleInfo? {
     val value = (entry as? JsonObject)?.get("value") as? JsonObject ?: return null
     val names = value.get("names")?.jsonArray?.map { it.jsonPrimitive.content } ?: return null
     val year = value.get("year")?.jsonPrimitive?.content?.toIntOrNull()
-    return TitleInfo(names, year)
+    val runtime = value.get("runtimeMin")?.jsonPrimitive?.content?.toIntOrNull()
+    return TitleInfo(names, year, runtime)
 }

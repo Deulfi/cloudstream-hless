@@ -29,13 +29,16 @@ import kotlin.test.assertEquals
 private class RecordingService(
     private val result: List<StremioStream> = emptyList(),
     private val fail: Boolean = false,
+    private val complete: Boolean = true,
 ) : StreamService {
     val calls = mutableListOf<Pair<String, String>>()
+    var lastSettings: Settings? = null
 
-    override suspend fun streams(type: String, id: String): List<StremioStream> {
+    override suspend fun streams(type: String, id: String, settings: Settings): StreamResult {
         calls += type to id
+        lastSettings = settings
         if (fail) throw IllegalStateException("boom")
-        return result
+        return StreamResult(result, complete)
     }
 }
 
@@ -252,6 +255,145 @@ class AddonServerTest {
             val response = client.options("/stream/movie/tt0111161.json")
             assertEquals(HttpStatusCode.NoContent, response.status)
             assertEquals("*", response.headers[HttpHeaders.AccessControlAllowOrigin])
+        }
+    }
+
+    @Test
+    fun `a partial answer is not cached`() {
+        val service = RecordingService(listOf(StremioStream("n", "d", "https://cdn.example/a.mp4")), complete = false)
+        testApplication {
+            application { addonModule(service, FakeClient(), null) }
+            val response = client.get("/stream/movie/tt0111161.json")
+            assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+            assertEquals(1, Json.parseToJsonElement(response.body<String>()).jsonObject["streams"]!!.jsonArray.size)
+        }
+    }
+
+    @Test
+    fun `the manifest says the addon is configurable`() {
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), null) }
+            val json = Json.parseToJsonElement(client.get("/manifest.json").body<String>()).jsonObject
+            val hints = json["behaviorHints"]!!.jsonObject
+            assertEquals("true", hints["configurable"]!!.jsonPrimitive.content)
+            assertEquals("false", hints["configurationRequired"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `a c~ segment lays preferences over the server defaults for that request`() {
+        val service = RecordingService()
+        val segment = encodePrefs(Prefs(minH = 720, sort = "size", off = listOf("Bad")))
+        testApplication {
+            application {
+                addonModule(service, FakeClient(), null, defaults = Settings(rank = RankSettings(providersDeny = listOf("Server"))))
+            }
+            assertEquals(HttpStatusCode.OK, client.get("/c~$segment/stream/movie/tt0111161.json").status)
+            val rank = service.lastSettings!!.rank
+            assertEquals(720, rank.minQuality)
+            assertEquals(SortMode.SIZE, rank.sort)
+            assertEquals(listOf("Server", "Bad"), rank.providersDeny)
+            // Without the segment the defaults apply.
+            client.get("/stream/movie/tt0111161.json")
+            assertEquals(0, service.lastSettings!!.rank.minQuality)
+        }
+    }
+
+    @Test
+    fun `a broken c~ segment falls back to the defaults instead of failing`() {
+        val service = RecordingService()
+        testApplication {
+            application { addonModule(service, FakeClient(), null) }
+            assertEquals(HttpStatusCode.OK, client.get("/c~!!!notbase64/stream/movie/tt0111161.json").status)
+            assertEquals(Settings(), service.lastSettings)
+        }
+    }
+
+    @Test
+    fun `providers a person switched off lose their catalogs in that manifest`() {
+        val engine = FakeClient(providers = listOf(
+            ProviderInfoDto(name = "A", providerId = "a", mainUrl = "https://a", language = "en", tvTypes = listOf("Movie"), hasMainPage = true),
+            ProviderInfoDto(name = "B", providerId = "b", mainUrl = "https://b", language = "en", tvTypes = listOf("Movie"), hasMainPage = true),
+        ))
+        val segment = encodePrefs(Prefs(off = listOf("B")))
+        testApplication {
+            application { addonModule(RecordingService(), engine, null) }
+            val json = Json.parseToJsonElement(client.get("/c~$segment/manifest.json").body<String>()).jsonObject
+            assertEquals(
+                listOf("A"),
+                json["catalogs"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content },
+            )
+        }
+    }
+
+    @Test
+    fun `the configuration page is served as one self-contained document`() {
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), null) }
+            val response = client.get("/configure")
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals(true, response.headers[HttpHeaders.ContentType]!!.startsWith("text/html"))
+            assertEquals(true, response.headers["Content-Security-Policy"]!!.contains("default-src 'none'"))
+            assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+            val html = response.body<String>()
+            assertEquals(true, html.contains("hless configuration"))
+            // It talks to nothing but this server.
+            assertEquals(false, html.contains("http://"))
+            assertEquals(false, html.contains("https://"))
+            assertEquals(HttpStatusCode.OK, client.get("/c~abc/configure").status)
+        }
+    }
+
+    @Test
+    fun `the providers api lists names only`() {
+        val engine = FakeClient(providers = listOf(
+            ProviderInfoDto(name = "A", providerId = "secret-id", mainUrl = "https://private.example", language = "de", tvTypes = listOf("Movie")),
+            ProviderInfoDto(name = "Hidden", providerId = "h", mainUrl = "https://h", language = "en", tvTypes = listOf("Movie")),
+        ))
+        testApplication {
+            application {
+                addonModule(RecordingService(), engine, null, defaults = Settings(rank = RankSettings(providersDeny = listOf("Hidden"))))
+            }
+            val body = client.get("/api/providers").body<String>()
+            val list = Json.parseToJsonElement(body).jsonArray.map { it.jsonObject }
+            assertEquals(listOf("A"), list.map { it["name"]!!.jsonPrimitive.content })
+            assertEquals(setOf("name", "language", "types"), list.single().keys)
+            assertEquals(false, body.contains("secret-id"))
+            assertEquals(false, body.contains("private.example"))
+        }
+    }
+
+    @Test
+    fun `the server api shows the defaults and nothing else`() {
+        testApplication {
+            application {
+                addonModule(
+                    RecordingService(), FakeClient(), null,
+                    defaults = Settings(rank = RankSettings(langs = listOf("de", "en"), minQuality = 720)),
+                    server = ServerInfo(mediaflow = true, publicUrl = "https://hless.example"),
+                )
+            }
+            val json = Json.parseToJsonElement(client.get("/api/server").body<String>()).jsonObject
+            assertEquals(setOf("mediaflow", "publicUrl", "denied", "defaults"), json.keys)
+            assertEquals("true", json["mediaflow"]!!.jsonPrimitive.content)
+            assertEquals("https://hless.example", json["publicUrl"]!!.jsonPrimitive.content)
+            val defaults = json["defaults"]!!.jsonObject
+            assertEquals(
+                setOf("langs", "minH", "maxH", "first", "sort", "perProv", "total", "variants", "flags", "icons", "proxy"),
+                defaults.keys,
+            )
+            assertEquals("720", defaults["minH"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `the new routes honour the secret prefix too`() {
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), "s3cret") }
+            for (path in listOf("/configure", "/api/server", "/api/providers", "/c~abc/configure", "/c~abc/manifest.json")) {
+                assertEquals(HttpStatusCode.NotFound, client.get(path).status, path)
+                assertEquals(HttpStatusCode.OK, client.get("/s3cret$path").status, "/s3cret$path")
+            }
         }
     }
 }

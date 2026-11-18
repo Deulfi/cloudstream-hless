@@ -47,4 +47,23 @@ class TitlesTest {
         assertEquals(TitleInfo(listOf("Cinemeta"), 2001), source(listOf("de")).lookup("movie", "tt1"))
         assertEquals(2, cinemetaCalls.get())
     }
+
+    @Test
+    fun `the runtime survives the disk cache`() = runBlocking {
+        val store = JsonFileStore(File(createTempDirectory("hless-titles").toString(), "titles.json"))
+        val tmdbCalls = AtomicInteger(0)
+        val src = TitleSource(
+            store = store,
+            tmdbKey = "k",
+            langs = listOf("en"),
+            tmdb = { _, _, _, _ ->
+                tmdbCalls.incrementAndGet()
+                TitleInfo(listOf("A"), 2026, 150)
+            },
+            cinemeta = { _, _ -> null },
+        )
+        assertEquals(TitleInfo(listOf("A"), 2026, 150), src.lookup("movie", "tt1"))
+        assertEquals(TitleInfo(listOf("A"), 2026, 150), src.lookup("movie", "tt1"))
+        assertEquals(1, tmdbCalls.get())
+    }
 }

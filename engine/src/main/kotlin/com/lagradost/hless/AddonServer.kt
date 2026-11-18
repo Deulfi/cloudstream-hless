@@ -2,8 +2,10 @@ package com.lagradost.hless
 
 import com.lagradost.macos.models.DetailsDto
 import com.lagradost.macos.models.ProviderInfoDto
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.withCharset
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
@@ -13,6 +15,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -27,35 +30,52 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** Resolves streams for one Stremio id; implemented by 2e. */
+/** What one stream request produced; [complete] is false when slow providers were not waited for (5c). */
+class StreamResult(val streams: List<StremioStream>, val complete: Boolean)
+
+/** Resolves streams for one Stremio id with one request's settings; implemented by 2e. */
 interface StreamService {
-    suspend fun streams(type: String, id: String): List<StremioStream>
+    suspend fun streams(type: String, id: String, settings: Settings): StreamResult
 }
 
-const val ADDON_VERSION: String = "0.1.0"
+/** Server facts the configuration page needs; never a secret. */
+class ServerInfo(val mediaflow: Boolean = false, val publicUrl: String? = null)
+
+const val ADDON_VERSION: String = "0.2.0"
 
 /**
- * The Stremio addon: manifest, stream/catalog/meta endpoints, CORS, optional
- * secret prefix. [secret] is exactly as configured; a blank one behaves like
- * no secret. [client] serves the dynamic manifest and the catalog/meta
- * routes (3b).
+ * The Stremio addon: manifest, stream/catalog/meta endpoints, the
+ * configuration page (6a), CORS, optional secret prefix. [secret] is exactly
+ * as configured; a blank one behaves like no secret. [client] serves the
+ * dynamic manifest and the catalog/meta routes (3b). [defaults] are the
+ * server's settings; a `c~<prefs>` path segment lays a person's preferences
+ * over them for that request.
  */
-fun Application.addonModule(service: StreamService, client: EngineClient, secret: String?) {
+fun Application.addonModule(
+    service: StreamService,
+    client: EngineClient,
+    secret: String?,
+    defaults: Settings = Settings(),
+    server: ServerInfo = ServerInfo(),
+) {
     install(ContentNegotiation) { json(addonJson) }
     intercept(ApplicationCallPipeline.Plugins) {
         call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
         call.response.headers.append(HttpHeaders.AccessControlAllowHeaders, "*")
         proceed()
     }
-    val manifestCache = ManifestCache(client)
+    val providers = ProviderCache(client)
     val prefix = secret?.trim()?.takeIf { it.isNotEmpty() }?.let { "/$it" }.orEmpty()
     routing {
         // Stremio sends a bare OPTIONS probe before each GET; answer 204 to all.
         options("/{path...}") { call.respond(HttpStatusCode.NoContent) }
         get("/healthz") { call.respondText("ok") }
         val mount: Route.() -> Unit = {
-            get("/manifest.json") { call.respond(manifestCache.get()) }
-            get("/stream/{type}/{id}.json") { call.streamRoute(service) }
+            get("/manifest.json") {
+                val settings = call.settings(defaults)
+                call.respond(manifest(providers.get().filter { askProvider(it.name, settings.rank) }))
+            }
+            get("/stream/{type}/{id}.json") { call.streamRoute(service, call.settings(defaults)) }
             get("/catalog/{type}/{id}.json") {
                 call.catalogRoute(client, type = call.parameters["type"], id = call.parameters["id"])
             }
@@ -68,55 +88,110 @@ fun Application.addonModule(service: StreamService, client: EngineClient, secret
             get("/meta/{type}/{id}.json") {
                 call.metaRoute(client, type = call.parameters["type"], id = call.parameters["id"])
             }
+            get("/configure") { call.configureRoute() }
+            get("/api/providers") {
+                // Names only: no provider ids, no URLs. Providers the server forbids are not offered.
+                val list = providers.get().filter { askProvider(it.name, defaults.rank) }
+                call.response.headers.append(HttpHeaders.CacheControl, "max-age=60")
+                val array = JsonArray(list.map { provider ->
+                    buildJsonObject {
+                        put("name", provider.name)
+                        put("language", provider.language)
+                        put("types", JsonArray(provider.tvTypes.map { JsonPrimitive(it) }))
+                    }
+                })
+                call.respondText(array.toString(), ContentType.Application.Json)
+            }
+            get("/api/server") {
+                call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+                call.respond(serverJson(defaults, server))
+            }
         }
-        if (prefix.isEmpty()) mount() else route(prefix) { mount() }
+        val mountAll: Route.() -> Unit = {
+            mount()
+            route("/c~{cfg}") { mount() }
+        }
+        if (prefix.isEmpty()) mountAll() else route(prefix) { mountAll() }
     }
 }
 
-/**
- * The manifest is built from the engine's providers and cached for 60 s.
- * A failed rebuild keeps the previous manifest.
- */
-private class ManifestCache(private val client: EngineClient) {
-    @Volatile
-    private var at = 0L
-    @Volatile
-    private var value: JsonObject = manifest(emptyList())
+private fun ApplicationCall.settings(defaults: Settings): Settings = decodePrefs(parameters["cfg"]).resolve(defaults)
 
-    suspend fun get(): JsonObject {
+/** The providers, cached for 60 s. A failed refresh keeps the previous list. */
+private class ProviderCache(private val client: EngineClient) {
+    @Volatile private var at = 0L
+    @Volatile private var value: List<ProviderInfoDto> = emptyList()
+
+    suspend fun get(): List<ProviderInfoDto> {
         if (System.currentTimeMillis() - at < 60_000L) return value
-        val providers = try {
+        val fresh = try {
             client.providers()
         } catch (e: Exception) {
             null
         }
-        if (providers != null) {
-            value = manifest(providers)
+        if (fresh != null) {
+            value = fresh
             at = System.currentTimeMillis()
         }
         return value
     }
 }
 
-private suspend fun ApplicationCall.streamRoute(service: StreamService) {
+private suspend fun ApplicationCall.streamRoute(service: StreamService, settings: Settings) {
     val type = parameters["type"].orEmpty()
     val id = parameters["id"].orEmpty()
-    val streams = if (type == "movie" || type == "series" || type == "anime") {
+    val result = if (type == "movie" || type == "series" || type == "anime") {
         try {
-            service.streams(type, id)
+            service.streams(type, id, settings)
         } catch (e: Exception) {
             // Never log the exception message: it may carry a stream URL.
             println("hless: stream resolution failed for $type/$id: ${e.javaClass.simpleName}")
-            emptyList()
+            StreamResult(emptyList(), false)
         }
     } else {
-        emptyList()
+        StreamResult(emptyList(), true)
     }
+    // A partial or empty answer must not be cached: the next request may get more.
     response.headers.append(
         HttpHeaders.CacheControl,
-        if (streams.isEmpty()) "no-store" else "max-age=60",
+        if (result.streams.isNotEmpty() && result.complete) "max-age=60" else "no-store",
     )
-    respond(StreamsResponse(streams))
+    respond(StreamsResponse(result.streams))
+}
+
+private val configureHtml: ByteArray? by lazy {
+    Settings::class.java.getResourceAsStream("/hless/configure.html")?.use { it.readBytes() }
+}
+
+/** The configuration page (6a): one static file; it never talks to anything but this server. */
+private suspend fun ApplicationCall.configureRoute() {
+    val html = configureHtml ?: return respond(HttpStatusCode.NotFound)
+    response.headers.append(HttpHeaders.CacheControl, "no-store")
+    response.headers.append(
+        "Content-Security-Policy",
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:",
+    )
+    respondBytes(html, ContentType.Text.Html.withCharset(Charsets.UTF_8))
+}
+
+/** What the page needs to start: whether MediaFlow exists, the public URL, and the defaults. No secrets. */
+private fun serverJson(defaults: Settings, server: ServerInfo): JsonObject = buildJsonObject {
+    put("mediaflow", server.mediaflow)
+    put("publicUrl", server.publicUrl)
+    put("denied", JsonArray(defaults.rank.providersDeny.map { JsonPrimitive(it) }))
+    put("defaults", buildJsonObject {
+        put("langs", JsonArray(defaults.rank.langs.map { JsonPrimitive(it) }))
+        put("minH", defaults.rank.minQuality)
+        put("maxH", defaults.rank.maxQuality)
+        put("first", JsonArray(defaults.rank.providersFirst.map { JsonPrimitive(it) }))
+        put("sort", defaults.rank.sort.name.lowercase())
+        put("perProv", defaults.rank.maxPerProvider)
+        put("total", defaults.rank.maxStreams)
+        put("variants", defaults.variants.name.lowercase())
+        put("flags", defaults.display.flags.name.lowercase())
+        put("icons", defaults.display.icons)
+        put("proxy", defaults.proxy)
+    })
 }
 
 /**
@@ -206,7 +281,10 @@ private fun manifest(providers: List<ProviderInfoDto>): JsonObject = buildJsonOb
     put("types", JsonArray(listOf(JsonPrimitive("movie"), JsonPrimitive("series"), JsonPrimitive("anime"))))
     put("idPrefixes", JsonArray(listOf(JsonPrimitive("tt"), JsonPrimitive("kitsu:"), JsonPrimitive("hless:"))))
     put("catalogs", JsonArray(catalogs(providers)))
-    put("behaviorHints", buildJsonObject { put("configurable", false) })
+    put("behaviorHints", buildJsonObject {
+        put("configurable", true)
+        put("configurationRequired", false)
+    })
 }
 
 /** One catalog per enabled provider with a main page, per covered type. */
@@ -237,6 +315,10 @@ private val addonJson = Json {
 /** Starts the addon server on [Config.port] (all interfaces) and blocks. */
 fun startAddonServer(service: StreamService, client: EngineClient) {
     embeddedServer(Netty, host = "0.0.0.0", port = Config.port) {
-        addonModule(service, client, Config.secret)
+        addonModule(
+            service, client, Config.secret,
+            defaults = Settings.fromConfig(),
+            server = ServerInfo(mediaflow = MediaFlow.configured(), publicUrl = Config.publicUrl),
+        )
     }.start(wait = true)
 }
