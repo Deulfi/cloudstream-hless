@@ -29,6 +29,8 @@ suspend fun resolveData(
     info: TitleInfo,
     timeoutMs: Long,
     cache: MatchCache = defaultCache,
+    /** Told once how the search came out, for the provider statistics. */
+    onOutcome: (SearchOutcome) -> Unit = {},
 ): String? {
     val key = id.imdb ?: id.kitsu?.let { "kitsu:$it" } ?: return null
     val kitsu = id.kitsu != null
@@ -47,17 +49,23 @@ suspend fun resolveData(
             if (match != null) {
                 cache.store(key, providerId, match.url)
                 matchName = match.name
+                onOutcome(SearchOutcome.HIT)
                 match.url
             } else {
                 // The engine answers an empty list both for "the site does not have it" and
                 // for a search that failed (blocked, down, timed out). A failure is slow, so
                 // a slow empty answer is not remembered as "not there".
-                if ((System.nanoTime() - searchStarted) / 1_000_000 < SLOW_SEARCH_MS) cache.store(key, providerId, null)
+                if ((System.nanoTime() - searchStarted) / 1_000_000 < SLOW_SEARCH_MS) {
+                    cache.store(key, providerId, null)
+                    onOutcome(SearchOutcome.MISS)
+                } else {
+                    onOutcome(SearchOutcome.FAIL)
+                }
                 null
             }
         }
         is MatchCache.Entry.Miss -> null
-        is MatchCache.Entry.Hit -> hit.url
+        is MatchCache.Entry.Hit -> hit.url.also { onOutcome(SearchOutcome.HIT) }
     }
     if (url == null) return null
     val details = try {

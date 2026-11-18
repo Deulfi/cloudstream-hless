@@ -8,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import java.security.SecureRandom
 
 fun main() {
+    System.setProperty("java.awt.headless", "true")
     // The engine is started in-process with its own bearer token, handed over
     // via argv (SEC-02 warns but accepts; stdin is for external supervisors).
     val token = ByteArray(32)

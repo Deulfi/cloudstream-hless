@@ -30,6 +30,9 @@ private class RecordingService(
     private val result: List<StremioStream> = emptyList(),
     private val fail: Boolean = false,
     private val complete: Boolean = true,
+    private val loading: Int = 0,
+    private val hiddenQuality: Int = 0,
+    private val hiddenHoster: Int = 0,
 ) : StreamService {
     val calls = mutableListOf<Pair<String, String>>()
     var lastSettings: Settings? = null
@@ -38,7 +41,7 @@ private class RecordingService(
         calls += type to id
         lastSettings = settings
         if (fail) throw IllegalStateException("boom")
-        return StreamResult(result, complete)
+        return StreamResult(result, complete, loading, hiddenQuality, hiddenHoster)
     }
 }
 
@@ -361,7 +364,7 @@ class AddonServerTest {
             assertEquals(true, response.headers["Content-Security-Policy"]!!.contains("default-src 'none'"))
             assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
             val html = response.body<String>()
-            assertEquals(true, html.contains("hless configuration"))
+            assertEquals(true, html.contains("Hless configuration"))
             // It talks to nothing but this server.
             assertEquals(false, html.contains("http://"))
             assertEquals(false, html.contains("https://"))
@@ -382,7 +385,7 @@ class AddonServerTest {
             val body = client.get("/api/providers").body<String>()
             val list = Json.parseToJsonElement(body).jsonArray.map { it.jsonObject }
             assertEquals(listOf("A"), list.map { it["name"]!!.jsonPrimitive.content })
-            assertEquals(setOf("name", "language", "types"), list.single().keys)
+            assertEquals(setOf("name", "language", "types", "hits", "tries", "usefulness"), list.single().keys)
             assertEquals(false, body.contains("secret-id"))
             assertEquals(false, body.contains("private.example"))
         }
@@ -404,7 +407,7 @@ class AddonServerTest {
             assertEquals("https://hless.example", json["publicUrl"]!!.jsonPrimitive.content)
             val defaults = json["defaults"]!!.jsonObject
             assertEquals(
-                setOf("langs", "minH", "maxH", "first", "sort", "perProv", "total", "variants", "flags", "icons", "proxy"),
+                setOf("langs", "minH", "maxH", "first", "sort", "perProv", "total", "variants", "flags", "icons", "proxy", "smart", "hint", "order", "hostOff"),
                 defaults.keys,
             )
             assertEquals("720", defaults["minH"]!!.jsonPrimitive.content)
@@ -415,10 +418,132 @@ class AddonServerTest {
     fun `the new routes honour the secret prefix too`() {
         testApplication {
             application { addonModule(RecordingService(), FakeClient(), "s3cret") }
-            for (path in listOf("/configure", "/api/server", "/api/providers", "/c~abc/configure", "/c~abc/manifest.json")) {
+            for (path in listOf("/configure", "/api/server", "/api/providers", "/api/hosters", "/c~abc/configure", "/c~abc/manifest.json")) {
                 assertEquals(HttpStatusCode.NotFound, client.get(path).status, path)
                 assertEquals(HttpStatusCode.OK, client.get("/s3cret$path").status, "/s3cret$path")
             }
+        }
+    }
+
+    @Test
+    fun `the address without a path opens the configuration page, keeping prefix and preferences`() {
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), null) }
+            val plain = createClient { followRedirects = false }
+            val root = plain.get("/")
+            assertEquals(HttpStatusCode.Found, root.status)
+            assertEquals("/configure", root.headers[HttpHeaders.Location])
+            assertEquals("/c~abc/configure", plain.get("/c~abc/").headers[HttpHeaders.Location])
+        }
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), "s3cret") }
+            val plain = createClient { followRedirects = false }
+            assertEquals("/s3cret/configure", plain.get("/s3cret").headers[HttpHeaders.Location])
+            assertEquals("/s3cret/configure", plain.get("/s3cret/").headers[HttpHeaders.Location])
+            assertEquals(HttpStatusCode.NotFound, plain.get("/").status)
+        }
+    }
+
+    @Test
+    fun `the icon is a public png, also when a secret is set`() {
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), "s3cret") }
+            val response = client.get("/logo.png")
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals("image/png", response.headers[HttpHeaders.ContentType])
+            assertEquals(true, response.headers[HttpHeaders.CacheControl]!!.contains("max-age"))
+            val bytes = response.body<ByteArray>()
+            assertEquals(listOf(0x89, 0x50, 0x4E, 0x47), bytes.take(4).map { it.toInt() and 0xFF })
+            assertEquals(HttpStatusCode.NotFound, client.get("/s3cret/logo.png").status)
+        }
+    }
+
+    @Test
+    fun `the manifest is called Hless and points at the icon, as the proxy forwarded the request`() {
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), null) }
+            fun manifest(block: io.ktor.client.request.HttpRequestBuilder.() -> Unit = {}) = kotlinx.coroutines.runBlocking {
+                Json.parseToJsonElement(client.get("/manifest.json", block).body<String>()).jsonObject
+            }
+            val plain = manifest()
+            assertEquals("Hless", plain["name"]!!.jsonPrimitive.content)
+            assertEquals(true, plain["logo"]!!.jsonPrimitive.content.endsWith("/logo.png"))
+            val proxied = manifest {
+                headers.append("X-Forwarded-Proto", "https")
+                headers.append("X-Forwarded-Host", "hless.example.org")
+            }
+            assertEquals("https://hless.example.org/logo.png", proxied["logo"]!!.jsonPrimitive.content)
+            val hostile = manifest { headers.append("X-Forwarded-Host", "evil.example/\"><script>") }
+            assertEquals(true, hostile["logo"]!!.jsonPrimitive.content.startsWith("http://localhost") || hostile["logo"]!!.jsonPrimitive.content.contains("localhost"))
+        }
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), null, server = ServerInfo(publicUrl = "https://p.example/")) }
+            val json = Json.parseToJsonElement(client.get("/manifest.json").body<String>()).jsonObject
+            assertEquals("https://p.example/logo.png", json["logo"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `a note row says what is still loading and what a filter hid, and links to the configuration`() {
+        val streams = listOf(StremioStream("n", "d", "https://cdn.example/a.mp4"))
+        testApplication {
+            application {
+                addonModule(RecordingService(streams, complete = false, loading = 2, hiddenQuality = 1, hiddenHoster = 3), FakeClient(), null)
+            }
+            val rows = Json.parseToJsonElement(client.get("/stream/movie/tt0111161.json").body<String>())
+                .jsonObject["streams"]!!.jsonArray.map { it.jsonObject }
+            assertEquals(2, rows.size)
+            val note = rows.last()
+            assertEquals(null, note["url"])
+            assertEquals(true, note["name"]!!.jsonPrimitive.content.contains("loading"))
+            val text = note["description"]!!.jsonPrimitive.content
+            assertEquals(true, text.contains("2 sources still loading"))
+            assertEquals(true, text.contains("1 hidden by your resolution filter"))
+            assertEquals(true, text.contains("3 hidden by your hoster filter"))
+            assertEquals(true, note["externalUrl"]!!.jsonPrimitive.content.endsWith("/configure"))
+        }
+    }
+
+    @Test
+    fun `the note is left out when switched off or when there is nothing to say`() {
+        val streams = listOf(StremioStream("n", "d", "https://cdn.example/a.mp4"))
+        testApplication {
+            application { addonModule(RecordingService(streams, complete = false, loading = 2), FakeClient(), null) }
+            val off = encodePrefs(Prefs(hint = false))
+            assertEquals(1, Json.parseToJsonElement(client.get("/c~$off/stream/movie/tt0111161.json").body<String>()).jsonObject["streams"]!!.jsonArray.size)
+        }
+        testApplication {
+            application { addonModule(RecordingService(streams), FakeClient(), null) }
+            assertEquals(1, Json.parseToJsonElement(client.get("/stream/movie/tt0111161.json").body<String>()).jsonObject["streams"]!!.jsonArray.size)
+        }
+    }
+
+    @Test
+    fun `the hosters api lists names and counts only`() {
+        val store = JsonFileStore(java.io.File(kotlin.io.path.createTempDirectory("hless-hosters").toString(), "s.json"), background = false)
+        val stats = ProviderStats(store)
+        stats.noteHoster("DoodStream"); stats.noteHoster("doodstream"); stats.noteHoster("Voe")
+        testApplication {
+            application { addonModule(RecordingService(), FakeClient(), null, stats = stats) }
+            val list = Json.parseToJsonElement(client.get("/api/hosters").body<String>()).jsonArray.map { it.jsonObject }
+            assertEquals(listOf("DoodStream", "Voe"), list.map { it["name"]!!.jsonPrimitive.content })
+            assertEquals(listOf("2", "1"), list.map { it["seen"]!!.jsonPrimitive.content })
+            assertEquals(setOf("name", "seen"), list.first().keys)
+        }
+    }
+
+    @Test
+    fun `the providers api shows how often each found something`() {
+        val store = JsonFileStore(java.io.File(kotlin.io.path.createTempDirectory("hless-stats"). toString(), "s.json"), background = false)
+        val stats = ProviderStats(store)
+        stats.record("A", SearchOutcome.HIT); stats.record("A", SearchOutcome.MISS)
+        val engine = FakeClient(providers = listOf(ProviderInfoDto(name = "A", providerId = "a", mainUrl = "https://a", language = "de", tvTypes = listOf("Movie"))))
+        testApplication {
+            application { addonModule(RecordingService(), engine, null, stats = stats) }
+            val a = Json.parseToJsonElement(client.get("/api/providers").body<String>()).jsonArray.single().jsonObject
+            assertEquals("1", a["hits"]!!.jsonPrimitive.content)
+            assertEquals("2", a["tries"]!!.jsonPrimitive.content)
+            assertEquals("likely", a["usefulness"]!!.jsonPrimitive.content)
         }
     }
 }

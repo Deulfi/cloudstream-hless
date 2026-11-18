@@ -43,7 +43,7 @@ class StreamPipelineTest {
     fun `the real shape folds, labels and orders`() {
         val rendered = render(listOf(megakino, kellerkino))
         assertEquals(
-            listOf("hless\n🎬 1080p 🇩🇪\nKellerkino", "hless\n🎬 800p 🇩🇪\nMegakino", "hless\n🎬 Auto 🇩🇪\nMegakino"),
+            listOf("大 Hless\n🎬 1080p 🇩🇪\nKellerkino", "大 Hless\n🎬 800p 🇩🇪\nMegakino", "大 Hless\n🎬 Auto 🇩🇪\nMegakino"),
             rendered.streams.map { it.name },
         )
         assertEquals(6, rendered.links)

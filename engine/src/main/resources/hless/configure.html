@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>hless configuration</title>
+<title>Hless configuration</title>
+<link rel="icon" type="image/png" href="/logo.png">
 <style>
   :root {
     --bg: #f6f6f8; --card: #ffffff; --fg: #1b1b1f; --muted: #62626b; --line: #dcdce3;
@@ -18,13 +19,16 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, sans-serif; }
   main { max-width: 720px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+  header { display: flex; align-items: center; gap: 12px; margin: 8px 0 4px; }
+  header img { width: 44px; height: 44px; border-radius: 10px; }
+  h1 { font-size: 1.4rem; margin: 0; }
   p.lead { color: var(--muted); margin: 0 0 16px; }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 0 0 14px; }
   h2 { font-size: 1rem; margin: 0 0 4px; }
   p.hint { color: var(--muted); font-size: .875rem; margin: 0 0 10px; }
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
   .row > label { min-width: 7.5rem; }
+  label.check { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
   select, input[type=number], input[type=text] {
     background: var(--field); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;
     padding: 8px 10px; font: inherit; min-width: 0;
@@ -41,6 +45,9 @@
   ul.list .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .tag { color: var(--muted); font-size: .8rem; }
   .off .name { opacity: .5; }
+  .dormant .name { opacity: .65; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details[open] summary { margin-bottom: 8px; }
   #url { width: 100%; font-family: ui-monospace, monospace; font-size: .8rem; }
   #notice { color: var(--muted); }
   a.button { display: inline-block; text-decoration: none; padding: 6px 10px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); }
@@ -48,7 +55,7 @@
 </head>
 <body>
 <main>
-  <h1>hless configuration</h1>
+  <header><img src="/logo.png" alt=""><h1>Hless configuration</h1></header>
   <p class="lead">Your choices are stored in the addon link below, not on the server. Install that link in Stremio.</p>
   <p id="notice">Loading…</p>
 
@@ -71,8 +78,17 @@
 
   <section>
     <h2>Providers</h2>
-    <p class="hint">Switch providers off, or pin the ones that should always come first.</p>
+    <label class="check"><input type="checkbox" id="smart"> Order providers by how often they find something</label>
+    <p class="hint">On: providers that usually find titles are searched first and waited for, the ones that never do run last; your order below only breaks ties. Off: they are searched exactly in the order shown. Use the checkbox to ask a provider at all, ☆ to list its streams first.</p>
     <ul class="list" id="providers"></ul>
+  </section>
+
+  <section>
+    <details id="hosters-box">
+      <summary>Hosters</summary>
+      <p class="hint">Switch off hosters that do not work for you. A stream from an unchecked hoster is left out.</p>
+      <ul class="list" id="hosters"></ul>
+    </details>
   </section>
 
   <section>
@@ -101,13 +117,14 @@
         <option value="code">Letters (DE)</option>
         <option value="none">Hidden</option>
       </select></div>
-    <div class="row"><label for="icons">Icons</label><input type="checkbox" id="icons"></div>
+    <label class="check"><input type="checkbox" id="icons"> Icons</label>
+    <label class="check"><input type="checkbox" id="hint"> Add a note at the end when results are still loading or were hidden by a filter</label>
   </section>
 
   <section id="proxy-section" hidden>
     <h2>Proxy</h2>
     <p class="hint">Send streams through the server's MediaFlow proxy. Most streams need it to play outside the desktop apps.</p>
-    <div class="row"><label for="proxy">Use MediaFlow</label><input type="checkbox" id="proxy"></div>
+    <label class="check"><input type="checkbox" id="proxy"> Use MediaFlow</label>
   </section>
 
   <section>
@@ -129,7 +146,7 @@
 
   var m = location.pathname.match(/^(.*?)(?:\/c~([A-Za-z0-9_-]+))?\/configure\/?$/);
   var base = m ? m[1] : '';
-  var server = null, providers = [], st = null;
+  var server = null, providers = [], hosters = [], st = null;
 
   function b64urlEncode(text) {
     var bytes = new TextEncoder().encode(text), s = '';
@@ -167,11 +184,16 @@
     var d = server.defaults, saved = {};
     if (m && m[2]) { try { saved = b64urlDecode(m[2]) || {}; } catch (e) { saved = {}; } }
     function pick(k) { return saved[k] !== undefined ? saved[k] : d[k]; }
+    var names = providers.map(function (p) { return p.name; });
+    var savedOrder = (pick('order') || []).filter(function (n) { return names.indexOf(n) >= 0; });
     st = {
       langs: (pick('langs') || []).slice(),
       minH: pick('minH'), maxH: pick('maxH'),
-      first: (pick('first') || []).slice(),
+      order: savedOrder.concat(names.filter(function (n) { return savedOrder.indexOf(n) < 0; })),
+      pinned: (pick('first') || []).slice(),
       off: (saved.off || []).slice(),
+      hostOff: (pick('hostOff') || []).slice(),
+      smart: pick('smart') !== false, hint: pick('hint') !== false,
       sort: pick('sort'), perProv: pick('perProv'), total: pick('total'),
       variants: pick('variants'), flags: pick('flags'), icons: pick('icons'), proxy: pick('proxy')
     };
@@ -205,52 +227,97 @@
     });
   }
 
+  function byName(name) {
+    for (var i = 0; i < providers.length; i++) if (providers[i].name === name) return providers[i];
+    return null;
+  }
+
   function renderProviders() {
     var ul = $('providers'); ul.textContent = '';
-    var names = providers.map(function (p) { return p.name; });
-    var pinned = st.first.filter(function (n) { return names.indexOf(n) >= 0; });
-    var rest = providers.filter(function (p) { return pinned.indexOf(p.name) < 0; })
-                        .sort(function (a, b) { return a.name.localeCompare(b.name); });
-    var ordered = pinned.map(function (n) { return providers.filter(function (p) { return p.name === n; })[0]; }).concat(rest);
-    ordered.forEach(function (p) {
+    st.order.forEach(function (name, i) {
+      var p = byName(name);
+      if (!p) return;
       var li = document.createElement('li');
-      var on = st.off.indexOf(p.name) < 0;
-      if (!on) li.className = 'off';
+      var on = st.off.indexOf(name) < 0;
+      var dormant = p.usefulness === 'dormant';
+      li.className = (on ? '' : 'off ') + (dormant ? 'dormant' : '');
       var box = document.createElement('input');
       box.type = 'checkbox'; box.checked = on; box.title = 'Ask this provider';
-      box.setAttribute('aria-label', 'Ask ' + p.name);
+      box.setAttribute('aria-label', 'Ask ' + name);
       box.addEventListener('change', function () {
-        var i = st.off.indexOf(p.name);
-        if (box.checked && i >= 0) st.off.splice(i, 1);
-        if (!box.checked && i < 0) st.off.push(p.name);
+        var k = st.off.indexOf(name);
+        if (box.checked && k >= 0) st.off.splice(k, 1);
+        if (!box.checked && k < 0) st.off.push(name);
         changed(); renderProviders();
       });
       li.appendChild(box);
-      var label = text('span', p.name, 'name');
+      var label = text('span', name, 'name');
       var meta = [p.language, (p.types || []).join(', ')].filter(Boolean).join(' · ');
       if (meta) label.appendChild(text('span', '  ' + meta, 'tag'));
       li.appendChild(label);
-      var pi = st.first.indexOf(p.name);
-      if (pi >= 0) {
-        li.appendChild(button('▲', 'Move up', function () { move(st.first, pi, -1); changed(); renderProviders(); }));
-        li.appendChild(button('▼', 'Move down', function () { move(st.first, pi, 1); changed(); renderProviders(); }));
+      if (p.tries > 0) {
+        var stat = text('span', p.hits + '/' + p.tries, 'tag');
+        stat.title = 'Found the title ' + p.hits + ' times in ' + p.tries + ' searches' + (dormant ? '; searched last' : '');
+        li.appendChild(stat);
       }
-      li.appendChild(button(pi >= 0 ? '★' : '☆', pi >= 0 ? 'Unpin' : 'Always first', function () {
-        if (pi >= 0) st.first.splice(pi, 1); else st.first.push(p.name);
+      li.appendChild(button('▲', 'Move up', function () { move(st.order, i, -1); changed(); renderProviders(); }));
+      li.appendChild(button('▼', 'Move down', function () { move(st.order, i, 1); changed(); renderProviders(); }));
+      var pinned = st.pinned.indexOf(name) >= 0;
+      li.appendChild(button(pinned ? '★' : '☆', pinned ? 'Unpin' : 'List its streams first', function () {
+        var k = st.pinned.indexOf(name);
+        if (k >= 0) st.pinned.splice(k, 1); else st.pinned.push(name);
         changed(); renderProviders();
       }));
       ul.appendChild(li);
     });
   }
 
+  function renderHosters() {
+    var ul = $('hosters'); ul.textContent = '';
+    var names = hosters.map(function (h) { return h.name; });
+    st.hostOff.forEach(function (n) { if (names.indexOf(n) < 0) { names.push(n); hosters.push({ name: n, seen: 0 }); } });
+    $('hosters-box').querySelector('summary').textContent = 'Hosters (' + hosters.length + ')' +
+      (st.hostOff.length ? ' · ' + st.hostOff.length + ' off' : '');
+    if (!hosters.length) {
+      var li = document.createElement('li');
+      li.appendChild(text('span', 'No hosters seen yet. They appear after the first searches.', 'name'));
+      ul.appendChild(li);
+      return;
+    }
+    hosters.forEach(function (h) {
+      var li = document.createElement('li');
+      var on = st.hostOff.indexOf(h.name) < 0;
+      if (!on) li.className = 'off';
+      var box = document.createElement('input');
+      box.type = 'checkbox'; box.checked = on;
+      box.setAttribute('aria-label', 'Show streams from ' + h.name);
+      box.addEventListener('change', function () {
+        var k = st.hostOff.indexOf(h.name);
+        if (box.checked && k >= 0) st.hostOff.splice(k, 1);
+        if (!box.checked && k < 0) st.hostOff.push(h.name);
+        changed(); renderHosters();
+      });
+      li.appendChild(box);
+      li.appendChild(text('span', h.name, 'name'));
+      if (h.seen) li.appendChild(text('span', 'seen ' + h.seen + '×', 'tag'));
+      ul.appendChild(li);
+    });
+  }
+
   function prefs() {
     var d = server.defaults, out = {};
+    var names = providers.map(function (p) { return p.name; });
     if (!same(st.langs, d.langs) && st.langs.length) out.langs = st.langs;
     if (st.minH !== d.minH) out.minH = st.minH;
     if (st.maxH !== d.maxH) out.maxH = st.maxH;
-    var off = st.off.filter(function (n) { return providers.some(function (p) { return p.name === n; }); });
+    var off = st.off.filter(function (n) { return names.indexOf(n) >= 0; });
     if (off.length) out.off = off;
-    if (!same(st.first, d.first)) out.first = st.first;
+    if (!same(st.order, names)) out.order = st.order;
+    var first = st.order.filter(function (n) { return st.pinned.indexOf(n) >= 0; });
+    if (!same(first, d.first)) out.first = first;
+    if (st.smart !== d.smart) out.smart = st.smart;
+    if (st.hint !== d.hint) out.hint = st.hint;
+    if (!same(st.hostOff, d.hostOff)) out.hostOff = st.hostOff;
     ['sort', 'perProv', 'total', 'variants', 'flags', 'icons'].forEach(function (k) { if (st[k] !== d[k]) out[k] = st[k]; });
     if (server.mediaflow && st.proxy !== d.proxy) out.proxy = st.proxy;
     return out;
@@ -279,8 +346,10 @@
         if (!isNaN(v)) { st[k] = Math.max(+this.min, Math.min(+this.max, v)); changed(); }
       });
     });
-    $('icons').checked = !!st.icons;
-    $('icons').addEventListener('change', function () { st.icons = this.checked; changed(); });
+    ['icons', 'smart', 'hint'].forEach(function (k) {
+      $(k).checked = !!st[k];
+      $(k).addEventListener('change', function () { st[k] = this.checked; changed(); });
+    });
     if (server.mediaflow) {
       $('proxy-section').hidden = false;
       $('proxy').checked = !!st.proxy;
@@ -305,9 +374,9 @@
     });
   }
 
-  Promise.all([get('/api/server'), get('/api/providers')]).then(function (res) {
-    server = res[0]; providers = res[1];
-    initState(); bind(); renderLangs(); renderProviders(); changed();
+  Promise.all([get('/api/server'), get('/api/providers'), get('/api/hosters')]).then(function (res) {
+    server = res[0]; providers = res[1]; hosters = res[2];
+    initState(); bind(); renderLangs(); renderProviders(); renderHosters(); changed();
     $('notice').textContent = providers.length ? '' : 'The server has no providers installed yet.';
   }).catch(function (e) {
     $('notice').textContent = 'Could not load the server settings (' + e.message + ').';

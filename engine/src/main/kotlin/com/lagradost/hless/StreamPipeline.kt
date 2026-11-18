@@ -40,6 +40,7 @@ fun renderStreams(
         title = title,
         runtimeSec = runtimeSeconds(results, runtimeFallbackMinutes),
         display = settings.display,
+        hostersOff = settings.rank.hostersOff.map { it.trim().lowercase() }.toSet(),
         mediaflow = if (settings.proxy) mediaflow else { _ -> null },
     )
     val dropped = EnumMap<DropReason, Int>(DropReason::class.java)

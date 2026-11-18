@@ -65,6 +65,9 @@ class JsonFileStore(
 
     fun get(key: String): JsonElement? = data[key]
 
+    /** The keys that start with [prefix]. */
+    fun keys(prefix: String): List<String> = data.keys.filter { it.startsWith(prefix) }
+
     fun put(key: String, value: JsonElement) {
         data[key] = buildJsonObject {
             put("at", JsonPrimitive(clock()))
@@ -175,10 +178,12 @@ object HlessStores {
     val matchStore: JsonFileStore by lazy { JsonFileStore(File(dataDir, "matches.json")) }
     val titleStore: JsonFileStore by lazy { JsonFileStore(File(dataDir, "titles.json")) }
     val kitsuStore: JsonFileStore by lazy { JsonFileStore(File(dataDir, "kitsu.json")) }
+    val statsStore: JsonFileStore by lazy { JsonFileStore(File(dataDir, "stats.json")) }
 
     fun shutdown() {
         runCatching { matchStore.close() }
         runCatching { titleStore.close() }
         runCatching { kitsuStore.close() }
+        runCatching { statsStore.close() }
     }
 }

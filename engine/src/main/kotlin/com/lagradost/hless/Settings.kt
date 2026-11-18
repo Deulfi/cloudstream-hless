@@ -26,6 +26,8 @@ data class Settings(
     val variants: Variants = Variants.FOLD,
     /** Wrap links in MediaFlow when the server has one. */
     val proxy: Boolean = true,
+    /** Add a note to the list when results are still loading or were hidden by a filter. */
+    val hint: Boolean = true,
 ) {
     companion object {
         fun fromConfig(): Settings = Settings(
@@ -42,6 +44,7 @@ data class Settings(
             ),
             display = DisplaySettings(label = Config.label, flags = Config.flags, icons = Config.icons),
             variants = Config.variants,
+            hint = Config.hint,
         )
     }
 }

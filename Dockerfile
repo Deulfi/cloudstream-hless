@@ -11,7 +11,7 @@ EXPOSE 7000
 ENTRYPOINT ["java", \
   "--add-modules=jdk.incubator.foreign", "--enable-native-access=ALL-UNNAMED", \
   "-XX:TieredStopAtLevel=1", "-Xms16m", "-Xmx192m", "-XX:MaxDirectMemorySize=64m", \
-  "-XX:+UseSerialGC", "-XX:+ExitOnOutOfMemoryError", \
+  "-XX:+UseSerialGC", "-XX:+ExitOnOutOfMemoryError", "-Dsun.net.inetaddr.ttl=600", "-Djava.awt.headless=true", \
   "-Dcs.cloudstream.home=/data", \
   "-cp", "/app/daemon.jar"]
 # The Stremio addon launcher (docs/plans/2a). Until it exists, run the engine

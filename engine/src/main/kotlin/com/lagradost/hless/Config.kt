@@ -35,6 +35,7 @@ class ConfigValues(env: Map<String, String>) {
     val sort: SortMode
     val minWaitMs: Long
     val quietMs: Long
+    val hint: Boolean
 
     init {
         port = intVar(env, "HLESS_PORT", 7000)
@@ -60,7 +61,7 @@ class ConfigValues(env: Map<String, String>) {
         solverCooldownMs = longVar(env, "HLESS_SOLVER_COOLDOWN_MS", 600_000)
         // 0 = ask the solver how many it can run at once (its /health), else 2.
         solverConcurrency = intVar(env, "HLESS_SOLVER_CONCURRENCY", 0)
-        label = strVar(env, "HLESS_LABEL")?.take(20) ?: "hless"
+        label = strVar(env, "HLESS_LABEL")?.take(20) ?: "大 Hless"
         flags = enumVar(env, "HLESS_FLAGS", FlagMode.EMOJI, FlagMode::parse, "emoji, code or none")
         icons = boolVar(env, "HLESS_ICONS", true)
         variants = enumVar(env, "HLESS_VARIANTS", Variants.FOLD, Variants::parse, "fold or all")
@@ -68,6 +69,7 @@ class ConfigValues(env: Map<String, String>) {
         sort = enumVar(env, "HLESS_SORT", SortMode.LANG, SortMode::parse, "lang, quality, provider or size")
         minWaitMs = longVar(env, "HLESS_MIN_WAIT_MS", 4_000)
         quietMs = longVar(env, "HLESS_QUIET_MS", 2_000)
+        hint = boolVar(env, "HLESS_HINT", true)
     }
 
     private fun boolVar(env: Map<String, String>, name: String, default: Boolean): Boolean {
@@ -147,4 +149,5 @@ object Config {
     val sort: SortMode get() = values.sort
     val minWaitMs: Long get() = values.minWaitMs
     val quietMs: Long get() = values.quietMs
+    val hint: Boolean get() = values.hint
 }

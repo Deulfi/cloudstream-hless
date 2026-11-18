@@ -24,7 +24,7 @@ enum class FlagMode {
 
 /** The look of a stream entry; one value per request (6a), defaults from the environment. */
 data class DisplaySettings(
-    val label: String = "hless",
+    val label: String = "大 Hless",
     val flags: FlagMode = FlagMode.EMOJI,
     val icons: Boolean = true,
 )

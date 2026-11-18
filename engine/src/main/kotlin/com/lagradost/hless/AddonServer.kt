@@ -16,6 +16,7 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -31,7 +32,16 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /** What one stream request produced; [complete] is false when slow providers were not waited for (5c). */
-class StreamResult(val streams: List<StremioStream>, val complete: Boolean)
+class StreamResult(
+    val streams: List<StremioStream>,
+    val complete: Boolean,
+    /** Providers worth waiting for that are still working. */
+    val loading: Int = 0,
+    /** Links left out by the person's resolution filter. */
+    val hiddenQuality: Int = 0,
+    /** Links left out by the person's hoster filter. */
+    val hiddenHoster: Int = 0,
+)
 
 /** Resolves streams for one Stremio id with one request's settings; implemented by 2e. */
 interface StreamService {
@@ -41,7 +51,7 @@ interface StreamService {
 /** Server facts the configuration page needs; never a secret. */
 class ServerInfo(val mediaflow: Boolean = false, val publicUrl: String? = null)
 
-const val ADDON_VERSION: String = "0.2.0"
+const val ADDON_VERSION: String = "0.3.0"
 
 /**
  * The Stremio addon: manifest, stream/catalog/meta endpoints, the
@@ -58,6 +68,7 @@ fun Application.addonModule(
     defaults: Settings = Settings(),
     server: ServerInfo = ServerInfo(),
     healthy: suspend () -> Boolean = { true },
+    stats: ProviderStats = ProviderStats(),
 ) {
     install(ContentNegotiation) { json(addonJson) }
     intercept(ApplicationCallPipeline.Plugins) {
@@ -71,15 +82,29 @@ fun Application.addonModule(
         // Stremio sends a bare OPTIONS probe before each GET; answer 204 to all.
         options("/{path...}") { call.respond(HttpStatusCode.NoContent) }
         // 200 only while the engine behind the addon answers, so a supervisor can restart a dead one.
+        // The bare secret address (no trailing slash) opens the configuration page too.
+        if (prefix.isNotEmpty()) get(prefix) { call.respondRedirect("$prefix/configure") }
+        // The icon is public and outside the secret prefix: Stremio asks for it without the prefix.
+        get("/logo.png") {
+            call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=86400")
+            call.respondBytes(Logo.png, ContentType.Image.PNG)
+        }
         get("/healthz") {
             if (healthy()) call.respondText("ok") else call.respondText("engine not ready", status = HttpStatusCode.ServiceUnavailable)
         }
         val mount: Route.() -> Unit = {
+            // Opening the addon's address without a path shows the configuration page.
+            get("/") {
+                call.respondRedirect("$prefix${call.cfgSegment()}/configure")
+            }
             get("/manifest.json") {
                 val settings = call.settings(defaults)
-                call.respond(manifest(providers.get().filter { askProvider(it.name, settings.rank) }))
+                call.respond(manifest(providers.get().filter { askProvider(it.name, settings.rank) }, call.origin(server.publicUrl) + "/logo.png"))
             }
-            get("/stream/{type}/{id}.json") { call.streamRoute(service, call.settings(defaults)) }
+            get("/stream/{type}/{id}.json") {
+                val configureUrl = call.origin(server.publicUrl) + prefix + call.cfgSegment() + "/configure"
+                call.streamRoute(service, call.settings(defaults), configureUrl)
+            }
             get("/catalog/{type}/{id}.json") {
                 call.catalogRoute(client, type = call.parameters["type"], id = call.parameters["id"])
             }
@@ -102,6 +127,21 @@ fun Application.addonModule(
                         put("name", provider.name)
                         put("language", provider.language)
                         put("types", JsonArray(provider.tvTypes.map { JsonPrimitive(it) }))
+                        val counts = stats.counts(provider.name)
+                        put("hits", counts.hits)
+                        put("tries", counts.tries)
+                        put("usefulness", stats.classify(provider.name).name.lowercase())
+                    }
+                })
+                call.respondText(array.toString(), ContentType.Application.Json)
+            }
+            get("/api/hosters") {
+                // Hoster names and how often they were seen; nothing else.
+                call.response.headers.append(HttpHeaders.CacheControl, "max-age=60")
+                val array = JsonArray(stats.hosters().map { (name, seen) ->
+                    buildJsonObject {
+                        put("name", name)
+                        put("seen", seen)
                     }
                 })
                 call.respondText(array.toString(), ContentType.Application.Json)
@@ -120,6 +160,21 @@ fun Application.addonModule(
 }
 
 private fun ApplicationCall.settings(defaults: Settings): Settings = decodePrefs(parameters["cfg"]).resolve(defaults)
+
+/** `/c~<prefs>` when the request came in under a preferences segment, else empty. */
+private fun ApplicationCall.cfgSegment(): String = parameters["cfg"]?.let { "/c~$it" }.orEmpty()
+
+private val SAFE_HOST = Regex("""^[A-Za-z0-9.\-:\[\]]{1,255}$""")
+
+/** The scheme and host this request was addressed to (behind a reverse proxy: as the proxy forwarded it), or the configured public URL. */
+private fun ApplicationCall.origin(publicUrl: String?): String {
+    if (publicUrl != null) return publicUrl.trimEnd('/')
+    val proto = request.headers["X-Forwarded-Proto"]?.substringBefore(',')?.trim()?.takeIf { it == "http" || it == "https" }
+        ?: request.local.scheme
+    val host = (request.headers["X-Forwarded-Host"]?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
+        ?: request.headers[HttpHeaders.Host])?.takeIf { SAFE_HOST.matches(it) } ?: "localhost"
+    return "$proto://$host"
+}
 
 /** The providers, cached for 60 s. A failed refresh keeps the previous list. */
 private class ProviderCache(private val client: EngineClient) {
@@ -141,7 +196,7 @@ private class ProviderCache(private val client: EngineClient) {
     }
 }
 
-private suspend fun ApplicationCall.streamRoute(service: StreamService, settings: Settings) {
+private suspend fun ApplicationCall.streamRoute(service: StreamService, settings: Settings, configureUrl: String) {
     val type = parameters["type"].orEmpty()
     val id = parameters["id"].orEmpty()
     val result = if (type == "movie" || type == "series" || type == "anime") {
@@ -160,7 +215,24 @@ private suspend fun ApplicationCall.streamRoute(service: StreamService, settings
         HttpHeaders.CacheControl,
         if (result.streams.isNotEmpty() && result.complete) "max-age=60" else "no-store",
     )
-    respond(StreamsResponse(result.streams))
+    val note = if (settings.hint) hintRow(settings.display.label, result, configureUrl) else null
+    respond(StreamsResponse(if (note != null) result.streams + note else result.streams))
+}
+
+private fun sources(n: Int) = if (n == 1) "1 source" else "$n sources"
+
+/** The row at the end of the list that says why it may be incomplete; null when there is nothing to say. */
+internal fun hintRow(label: String, result: StreamResult, configureUrl: String): StremioStream? {
+    val lines = ArrayList<String>()
+    if (result.loading > 0) {
+        lines += "\u23F3 ${sources(result.loading)} still loading"
+        lines += "Reopen this title in a few seconds"
+    }
+    if (result.hiddenQuality > 0) lines += "\uD83D\uDD0E ${result.hiddenQuality} hidden by your resolution filter"
+    if (result.hiddenHoster > 0) lines += "\uD83D\uDD0E ${result.hiddenHoster} hidden by your hoster filter"
+    if (lines.isEmpty()) return null
+    val tag = if (result.loading > 0) "\u23F3 loading" else "\uD83D\uDD0E hidden"
+    return StremioStream(name = "$label\n$tag", description = lines.joinToString("\n"), externalUrl = configureUrl)
 }
 
 private val configureHtml: ByteArray? by lazy {
@@ -173,7 +245,7 @@ private suspend fun ApplicationCall.configureRoute() {
     response.headers.append(HttpHeaders.CacheControl, "no-store")
     response.headers.append(
         "Content-Security-Policy",
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:",
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:",
     )
     respondBytes(html, ContentType.Text.Html.withCharset(Charsets.UTF_8))
 }
@@ -195,6 +267,10 @@ private fun serverJson(defaults: Settings, server: ServerInfo): JsonObject = bui
         put("flags", defaults.display.flags.name.lowercase())
         put("icons", defaults.display.icons)
         put("proxy", defaults.proxy)
+        put("smart", defaults.rank.smart)
+        put("hint", defaults.hint)
+        put("order", JsonArray(defaults.rank.order.map { JsonPrimitive(it) }))
+        put("hostOff", JsonArray(defaults.rank.hostersOff.map { JsonPrimitive(it) }))
     })
 }
 
@@ -276,10 +352,11 @@ private fun videos(hless: HlessId, details: DetailsDto): List<JsonObject> =
             }
         }
 
-private fun manifest(providers: List<ProviderInfoDto>): JsonObject = buildJsonObject {
+private fun manifest(providers: List<ProviderInfoDto>, logo: String): JsonObject = buildJsonObject {
     put("id", "community.cloudstream.hless")
     put("version", ADDON_VERSION)
-    put("name", "CloudStream hless")
+    put("name", "Hless")
+    put("logo", logo)
     put("description", "Streams resolved by CloudStream extensions on your own server.")
     put("resources", JsonArray(listOf(JsonPrimitive("stream"), JsonPrimitive("catalog"), JsonPrimitive("meta"))))
     put("types", JsonArray(listOf(JsonPrimitive("movie"), JsonPrimitive("series"), JsonPrimitive("anime"))))

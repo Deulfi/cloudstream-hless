@@ -30,7 +30,7 @@ class ConfigTest {
         assertEquals(60_000L, config.solverTimeoutMs)
         assertEquals(600_000L, config.solverCooldownMs)
         assertEquals(0, config.solverConcurrency)
-        assertEquals("hless", config.label)
+        assertEquals("大 Hless", config.label)
         assertEquals(FlagMode.EMOJI, config.flags)
         assertEquals(true, config.icons)
         assertEquals(Variants.FOLD, config.variants)

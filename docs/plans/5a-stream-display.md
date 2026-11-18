@@ -11,6 +11,9 @@ three-line names and the description lines below. Deviations from the text below
 `Candidate` also carries `lowQuality` and `sizeBytes`, and the mapper returns
 `MapResult` (a stream or a `DropReason`) instead of null.
 
+> The first line of a stream name is now `大 Hless` (a stick figure without a head, then the name);
+> the golden examples below show the older plain `hless`. See [7a](7a-first-answer.md).
+
 ## Why this plan exists
 
 Checked on 2026-11-18 against the running addon (film with five German

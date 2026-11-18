@@ -14,6 +14,8 @@ data class MapContext(
     /** The runtime of the title in seconds when known; turns a file size into a bitrate. */
     val runtimeSec: Double?,
     val display: DisplaySettings,
+    /** Lower-cased hoster names (the `source` of a link) the person switched off. */
+    val hostersOff: Set<String> = emptySet(),
     /** The MediaFlow URL for a link, or null to hand the link over as it is. */
     val mediaflow: (StreamLinkDto) -> String? = { null },
 )
@@ -37,6 +39,7 @@ object StreamMapper {
         if (link.type == "TORRENT" || link.type == "MAGNET") return MapResult.Dropped(DropReason.TORRENT)
         if (!link.url.startsWith("http://") && !link.url.startsWith("https://")) return MapResult.Dropped(DropReason.NOT_HTTP)
         if (link.audioTracks.isNotEmpty()) return MapResult.Dropped(DropReason.SPLIT_AUDIO)
+        if (link.source.trim().lowercase() in ctx.hostersOff) return MapResult.Dropped(DropReason.HOSTER_OFF)
         val proxy = ctx.mediaflow(link)
         if (link.drm != null && proxy == null) return MapResult.Dropped(DropReason.DRM_NO_MEDIAFLOW)
 

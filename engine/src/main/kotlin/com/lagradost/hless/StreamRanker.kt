@@ -4,7 +4,7 @@ import java.util.Locale
 
 /** Why a link did not end up in the list; counted, never shown (5c). */
 enum class DropReason {
-    TORRENT, NOT_HTTP, SPLIT_AUDIO, DRM_NO_MEDIAFLOW, BELOW_MIN_QUALITY, ABOVE_MAX_QUALITY, DUPLICATE, OVER_CAP,
+    TORRENT, NOT_HTTP, SPLIT_AUDIO, DRM_NO_MEDIAFLOW, HOSTER_OFF, BELOW_MIN_QUALITY, ABOVE_MAX_QUALITY, DUPLICATE, OVER_CAP,
 }
 
 /** One ranked stream with the metadata the ranker needs. */
@@ -49,6 +49,12 @@ data class RankSettings(
     val providersAllow: List<String> = emptyList(),
     val providersFirst: List<String> = emptyList(),
     val sort: SortMode = SortMode.LANG,
+    /** The person's provider order from the configuration page; empty = the engine's. */
+    val order: List<String> = emptyList(),
+    /** Search the providers that usually find something first, and wait only for those. Off: exactly [order]. */
+    val smart: Boolean = true,
+    /** Hosters (the `source` of a link) the person switched off. */
+    val hostersOff: List<String> = emptyList(),
 )
 
 class RankResult(val streams: List<StremioStream>, val dropped: Map<DropReason, Int>)

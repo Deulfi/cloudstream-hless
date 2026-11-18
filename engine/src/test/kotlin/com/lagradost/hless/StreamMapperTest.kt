@@ -39,11 +39,12 @@ class StreamMapperTest {
         subtitles: List<SubtitleDto> = emptyList(),
         language: String? = null,
         runtimeSec: Double? = null,
+        hostersOff: Set<String> = emptySet(),
     ): MapResult = StreamMapper.map(
         provider.copy(language = language),
         Item(link, facts),
         subtitles,
-        MapContext("Title (2026)", runtimeSec, DisplaySettings(), mediaflow),
+        MapContext("Title (2026)", runtimeSec, DisplaySettings(), hostersOff, mediaflow),
     )
 
     private fun stream(result: MapResult): Candidate = (result as MapResult.Stream).candidate
@@ -64,6 +65,16 @@ class StreamMapperTest {
             DropReason.DRM_NO_MEDIAFLOW,
             dropped(map(link("https://a", type = "DASH", drm = ClearKeyDto(key = "k")))),
         )
+    }
+
+    @Test
+    fun `a hoster the person switched off is dropped, whatever its case`() {
+        val voe = link("https://a", source = "Voe")
+        assertEquals(DropReason.HOSTER_OFF, dropped(map(voe, hostersOff = setOf("voe"))))
+        assertEquals(DropReason.HOSTER_OFF, dropped(map(link("https://a", source = " VOE "), hostersOff = setOf("voe"))))
+        // only that exact hoster: "Voe MP4" is another source name
+        stream(map(link("https://a", source = "Voe MP4"), hostersOff = setOf("voe")))
+        stream(map(voe, hostersOff = setOf("doodstream")))
     }
 
     @Test
@@ -106,7 +117,7 @@ class StreamMapperTest {
     fun `unknown quality is shown as Auto and never as 400p`() {
         for (quality in listOf(400, 0, -1)) {
             val candidate = stream(map(link("https://a", quality = quality, type = "VIDEO")))
-            assertEquals("hless\n🎬 Auto\nProv", candidate.stream.name)
+            assertEquals("大 Hless\n🎬 Auto\nProv", candidate.stream.name)
             assertTrue("📺 Auto • Direct" in candidate.stream.description)
         }
     }
@@ -115,7 +126,7 @@ class StreamMapperTest {
     fun `a probed master lists its variants and its bandwidth`() {
         val facts = LinkFacts(Kind.MASTER, heights = listOf(800, 720, 480), topBandwidthKbps = 2642)
         val candidate = stream(map(link("https://a", quality = 400, source = "Voe"), facts, language = "de"))
-        assertEquals("hless\n🎬 800p 🇩🇪\nProv", candidate.stream.name)
+        assertEquals("大 Hless\n🎬 800p 🇩🇪\nProv", candidate.stream.name)
         assertEquals(
             "🎬 Title (2026)\n📺 800p · 720p · 480p • HLS\n🔗 Prov • Voe\n💾 ~2.6 Mbps",
             candidate.stream.description,
@@ -150,7 +161,7 @@ class StreamMapperTest {
 
     @Test
     fun `name carries the language flag`() {
-        assertEquals("hless\n🎬 1080p 🇩🇪\nProv", stream(map(link("https://a"), language = "de")).stream.name)
-        assertEquals("hless\n🎬 720p 🇬🇧\nProv", stream(map(link("https://a", quality = 720), language = "en")).stream.name)
+        assertEquals("大 Hless\n🎬 1080p 🇩🇪\nProv", stream(map(link("https://a"), language = "de")).stream.name)
+        assertEquals("大 Hless\n🎬 720p 🇬🇧\nProv", stream(map(link("https://a", quality = 720), language = "en")).stream.name)
     }
 }

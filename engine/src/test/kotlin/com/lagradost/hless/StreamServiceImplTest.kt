@@ -47,16 +47,21 @@ class StreamServiceImplTest {
         private val links: Map<String, List<StreamLinkDto>> = emptyMap(),
         private val fail: Set<String> = emptySet(),
         private val searchDelayMs: Map<String, Long> = emptyMap(),
+        private val resultType: String = "Movie",
     ) : EngineClient {
         val linkCalls = ConcurrentHashMap<String, Int>()
+        val linkData = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        /** (provider, nanoTime) of each search, in the order the searches began. */
+        val searches = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, Long>>()
 
         override suspend fun health(): HealthDto = error("not used")
         override suspend fun awaitReady(timeoutMs: Long) = Unit
         override suspend fun providers(timeoutMs: Long): List<ProviderInfoDto> = providers
         override suspend fun search(providerId: String, query: String, timeoutMs: Long): List<SearchResultDto> {
+            searches += providerId to System.nanoTime()
             searchDelayMs[providerId]?.let { delay(it) }
             return listOf(
-                SearchResultDto(name = "Test Movie", url = "https://$providerId/page", provider = providerId, type = "Movie", year = 2020),
+                SearchResultDto(name = "Test Movie", url = "https://$providerId/page", provider = providerId, type = resultType, year = 2020),
             )
         }
         override suspend fun details(providerId: String, url: String, timeoutMs: Long): DetailsDto =
@@ -64,6 +69,7 @@ class StreamServiceImplTest {
         override suspend fun home(providerId: String, page: Int, timeoutMs: Long): HomePageDto = error("not used")
         override suspend fun links(providerId: String, data: String, budgetMs: Long): LinksResponseDto {
             linkCalls.merge(providerId, 1, Int::plus)
+            linkData += data
             linksDelayMs[providerId]?.let { delay(it) }
             if (providerId in fail) throw IllegalStateException("boom")
             return LinksResponseDto(provider = providerId, links = links[providerId] ?: emptyList())
@@ -86,10 +92,21 @@ class StreamServiceImplTest {
         minWaitMs: Long = 4_000,
         quietMs: Long = 3_000,
         clock: () -> Long = System::currentTimeMillis,
+        stats: ProviderStats = freshStats(),
+        prefetch: Boolean = false,
+        gateHoldMs: Long = 8_000L,
+        matches: MatchCache = freshMatches(),
     ) = StreamServiceImpl(
         client, titles = FakeTitles(), prober = NoProbe,
         deadlineMs = deadlineMs, minWaitMs = minWaitMs, quietMs = quietMs, clock = clock,
+        stats = stats, prefetch = prefetch, gateHoldMs = gateHoldMs, matches = matches,
     ).also { services += it }
+
+    private fun freshMatches() =
+        MatchCache(JsonFileStore(java.io.File(kotlin.io.path.createTempDirectory("hless-matches").toString(), "m.json"), background = false))
+
+    private fun freshStats() =
+        ProviderStats(JsonFileStore(java.io.File(kotlin.io.path.createTempDirectory("hless-stats").toString(), "s.json"), background = false))
 
     @Test
     fun `deadline returns what is ready and later calls get the rest`() = runBlocking {
@@ -148,14 +165,14 @@ class StreamServiceImplTest {
     }
 
     @Test
-    fun `providers stuck in their search never take the places the others need`() = runBlocking {
-        val stuck = (1..20).map { provider("stuck$it") }
+    fun `a search that waits for a blocked site gives up its place after a while`() = runBlocking {
+        val stuck = (1..12).map { provider("stuck$it") }
         val fake = FakeClient(
             providers = stuck + provider("fast"),
             searchDelayMs = stuck.associate { it.providerId to 60_000L },
             links = mapOf("fast" to listOf(link("https://fast.example/stream"))),
         )
-        val service = service(fake, deadlineMs = 10_000, minWaitMs = 300, quietMs = 300)
+        val service = service(fake, deadlineMs = 10_000, minWaitMs = 300, quietMs = 300, gateHoldMs = 300)
         val result = service.streams("movie", "tt0000010", Settings())
         assertEquals(listOf("https://fast.example/stream"), result.streams.map { it.url })
     }
@@ -285,5 +302,157 @@ class StreamServiceImplTest {
         assertEquals(1, result.streams.size)
         assertEquals("https://a.stream", result.streams[0].url)
         assertTrue("A Movie" in result.streams[0].description)
+    }
+
+    // ---- order, relevance, prefetch (the first answer should hold what matters)
+
+    private fun settle(stats: ProviderStats, name: String, outcome: SearchOutcome, times: Int = 1) =
+        repeat(times) { stats.record(name, outcome) }
+
+    @Test
+    fun `providers that usually find something search first, the ones that never do search last`() = runBlocking {
+        val stats = freshStats()
+        settle(stats, "likely1", SearchOutcome.HIT)
+        settle(stats, "likely2", SearchOutcome.HIT)
+        settle(stats, "dormant1", SearchOutcome.FAIL, 10)
+        settle(stats, "dormant2", SearchOutcome.MISS, 10)
+        val names = listOf("dormant1", "dormant2", "new1", "new2", "new3", "new4", "likely1", "likely2")
+        val fake = FakeClient(
+            providers = names.map { provider(it) },
+            searchDelayMs = names.associateWith { 400L },
+            links = names.associateWith { listOf(link("https://$it.example/stream")) },
+        )
+        val service = service(fake, deadlineMs = 10_000, stats = stats)
+        service.streams("movie", "tt0000030", Settings())
+        delay(900)   // the dormant ones start once the others are through their search
+        val begun = fake.searches.toList()
+        assertEquals(setOf("likely1", "likely2"), begun.take(2).map { it.first }.toSet())
+        // six places: the two likely and four new ones start at once; the dormant two wait for a place
+        val firstBatch = begun.take(6).map { it.first }.toSet()
+        assertEquals(setOf("likely1", "likely2", "new1", "new2", "new3", "new4"), firstBatch)
+        val late = begun.drop(6)
+        assertEquals(setOf("dormant1", "dormant2"), late.map { it.first }.toSet())
+        assertTrue((late.minOf { it.second } - begun.first().second) / 1_000_000 >= 300, "the dormant ones started too early")
+    }
+
+    @Test
+    fun `the dormant providers search only after the useful ones are through their search`() = runBlocking {
+        val stats = freshStats()
+        settle(stats, "ghost", SearchOutcome.FAIL, 10)
+        val fake = FakeClient(
+            providers = listOf(provider("ghost"), provider("useful")),
+            searchDelayMs = mapOf("useful" to 500L),
+        )
+        val service = service(fake, deadlineMs = 5_000, minWaitMs = 100, quietMs = 100, stats = stats)
+        service.streams("movie", "tt0000036", Settings())
+        delay(300)
+        val begun = fake.searches.toList()
+        val useful = begun.first { it.first == "useful" }.second
+        val ghost = begun.firstOrNull { it.first == "ghost" }?.second
+        assertEquals(true, ghost == null || (ghost - useful) / 1_000_000 >= 450, "the dormant provider searched too early")
+    }
+
+    @Test
+    fun `a provider whose site the solver gave up on is not asked while that lasts`() = runBlocking {
+        BlockedHosts.clear()
+        BlockedHosts.block("walled.example", 60_000)
+        try {
+            val fake = FakeClient(
+                providers = listOf(provider("walled"), provider("open")),
+                links = mapOf("open" to listOf(link("https://open.example/stream"))),
+            )
+            val result = service(fake).streams("movie", "tt0000037", Settings())
+            assertEquals(listOf("https://open.example/stream"), result.streams.map { it.url })
+            assertEquals(listOf("open"), fake.searches.toList().map { it.first })
+        } finally {
+            BlockedHosts.clear()
+        }
+    }
+
+    @Test
+    fun `without the smart order the providers search exactly in the order given`() = runBlocking {
+        val stats = freshStats()
+        settle(stats, "p8", SearchOutcome.HIT)                          // would come first if smart
+        val names = (1..8).map { "p$it" }
+        val fake = FakeClient(providers = names.map { provider(it) }, searchDelayMs = names.associateWith { 300L })
+        val service = service(fake, deadlineMs = 5_000, minWaitMs = 100, quietMs = 100, stats = stats)
+        val order = listOf("p3", "p1", "p2", "p8", "p7", "p6", "p5", "p4")
+        service.streams("movie", "tt0000031", Settings(rank = RankSettings(order = order, smart = false)))
+        assertEquals(order.take(6), fake.searches.toList().take(6).map { it.first })
+    }
+
+    @Test
+    fun `the dormant providers do not hold the answer`() = runBlocking {
+        val stats = freshStats()
+        settle(stats, "ghost", SearchOutcome.FAIL, 10)
+        val fake = FakeClient(
+            providers = listOf(provider("ghost"), provider("fast")),
+            searchDelayMs = mapOf("ghost" to 60_000L),
+            links = mapOf("fast" to listOf(link("https://fast.example/stream"))),
+        )
+        val service = service(fake, deadlineMs = 20_000, minWaitMs = 10_000, quietMs = 10_000, stats = stats)
+        val started = System.currentTimeMillis()
+        val result = service.streams("movie", "tt0000032", Settings())
+        assertEquals(listOf("https://fast.example/stream"), result.streams.map { it.url })
+        assertFalse(result.complete)
+        assertEquals(0, result.loading)          // nothing worth waiting for is left
+        assertTrue(System.currentTimeMillis() - started < 5_000)
+    }
+
+    @Test
+    fun `a provider that usually delivers is waited for even when the others have gone quiet`() = runBlocking {
+        val stats = freshStats()
+        settle(stats, "steady", SearchOutcome.HIT)
+        val fake = FakeClient(
+            providers = listOf(provider("steady"), provider("quick")),
+            searchDelayMs = mapOf("steady" to 2_500L),
+            links = mapOf("steady" to listOf(link("https://steady.example/stream")), "quick" to listOf(link("https://quick.example/stream"))),
+        )
+        val service = service(fake, deadlineMs = 20_000, minWaitMs = 300, quietMs = 300, stats = stats)
+        val result = service.streams("movie", "tt0000033", Settings())
+        assertEquals(setOf("https://steady.example/stream", "https://quick.example/stream"), result.streams.map { it.url }.toSet())
+    }
+
+    @Test
+    fun `a partial answer says how many providers are still loading, and what a filter hid`() = runBlocking {
+        val fake = FakeClient(
+            providers = listOf(provider("slow"), provider("quick")),
+            linksDelayMs = mapOf("slow" to 60_000L),
+            links = mapOf(
+                "quick" to listOf(
+                    StreamLinkDto(url = "https://quick.example/low", name = "n", source = "Voe", quality = 480, type = "VIDEO"),
+                    StreamLinkDto(url = "https://quick.example/dood", name = "n", source = "DoodStream", quality = 1080, type = "VIDEO"),
+                ),
+            ),
+        )
+        val service = service(fake, deadlineMs = 1_500, minWaitMs = 10_000, stats = freshStats())
+        val settings = Settings(rank = RankSettings(minQuality = 720, hostersOff = listOf("doodstream")))
+        val result = service.streams("movie", "tt0000034", settings)
+        assertEquals(0, result.streams.size)
+        assertFalse(result.complete)
+        assertEquals(1, result.loading)
+        assertEquals(1, result.hiddenQuality)
+        assertEquals(1, result.hiddenHoster)
+    }
+
+    @Test
+    fun `after an episode the providers that delivered it start on the next one`() = runBlocking {
+        val episodes = DetailsDto(
+            provider = "a", url = "u", name = "Show", type = "TvSeries",
+            episodes = listOf(EpisodeDto(data = "ep1", season = 1, episode = 1), EpisodeDto(data = "ep2", season = 1, episode = 2)),
+        )
+        val series = ProviderInfoDto(name = "a", providerId = "a", mainUrl = "https://a.example", language = "en", tvTypes = listOf("TvSeries"))
+        val fake = FakeClient(
+            providers = listOf(series), details = episodes, resultType = "TvSeries",
+            links = mapOf("a" to listOf(link("https://a.example/stream"))),
+        )
+        val service = service(fake, prefetch = true)
+        service.streams("series", "tt0000035:1:1", Settings())
+        delay(1_500)
+        assertEquals(listOf("ep1", "ep2"), fake.linkData.toList())
+        // opening the next episode now finds it ready: no new link call
+        val next = service.streams("series", "tt0000035:1:2", Settings())
+        assertEquals(1, next.streams.size)
+        assertEquals(2, fake.linkData.size)
     }
 }

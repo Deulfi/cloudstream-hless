@@ -27,11 +27,18 @@ data class Prefs(
     val flags: String? = null,
     val icons: Boolean? = null,
     val proxy: Boolean? = null,
+    /** The person's provider order (all names, in order). */
+    val order: List<String>? = null,
+    /** Order the search by how often providers find something. */
+    val smart: Boolean? = null,
+    /** Hosters switched off. */
+    val hostOff: List<String>? = null,
+    val hint: Boolean? = null,
 )
 
 private val prefsJson = Json { ignoreUnknownKeys = true; isLenient = false; encodeDefaults = false; explicitNulls = false }
 
-private const val MAX_SEGMENT_CHARS = 3_000   // about 2 KiB once decoded
+private const val MAX_SEGMENT_CHARS = 4_000   // about 3 KiB once decoded
 private const val MAX_LIST = 60
 private const val MAX_NAME = 40
 
@@ -43,7 +50,7 @@ fun decodePrefs(segment: String?): Prefs? {
     if (segment.isNullOrEmpty() || segment.length > MAX_SEGMENT_CHARS) return null
     return try {
         val bytes = Base64.getUrlDecoder().decode(segment)
-        if (bytes.size > 2_048) null else prefsJson.decodeFromString(Prefs.serializer(), String(bytes, Charsets.UTF_8))
+        if (bytes.size > 3_072) null else prefsJson.decodeFromString(Prefs.serializer(), String(bytes, Charsets.UTF_8))
     } catch (e: Exception) {
         null
     }
@@ -52,8 +59,8 @@ fun decodePrefs(segment: String?): Prefs? {
 fun encodePrefs(prefs: Prefs): String =
     Base64.getUrlEncoder().withoutPadding().encodeToString(prefsJson.encodeToString(Prefs.serializer(), prefs).toByteArray())
 
-private fun names(list: List<String>?): List<String>? =
-    list?.map { it.trim().take(MAX_NAME) }?.filter { it.isNotEmpty() }?.take(MAX_LIST)
+private fun names(list: List<String>?, max: Int = MAX_LIST): List<String>? =
+    list?.map { it.trim().take(MAX_NAME) }?.filter { it.isNotEmpty() }?.take(max)
 
 /** The server's [defaults] with these preferences laid over them. Values are clamped; nothing here can widen what the server allows. */
 fun Prefs?.resolve(defaults: Settings): Settings {
@@ -74,6 +81,9 @@ fun Prefs?.resolve(defaults: Settings): Settings {
         sort = SortMode.parse(sort) ?: rank.sort,
         maxPerProvider = perProv?.coerceIn(1, 20) ?: rank.maxPerProvider,
         maxStreams = total?.coerceIn(1, 100) ?: rank.maxStreams,
+        order = names(order, 100) ?: rank.order,
+        smart = smart ?: rank.smart,
+        hostersOff = names(hostOff, 100) ?: rank.hostersOff,
     )
     return defaults.copy(
         rank = resolvedRank,
@@ -83,5 +93,6 @@ fun Prefs?.resolve(defaults: Settings): Settings {
         ),
         variants = Variants.parse(variants) ?: defaults.variants,
         proxy = proxy ?: defaults.proxy,
+        hint = hint ?: defaults.hint,
     )
 }

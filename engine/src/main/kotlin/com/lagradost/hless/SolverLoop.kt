@@ -52,6 +52,34 @@ class HostCooldown(private val cooldownMs: Long, private val clock: () -> Long =
     }
 }
 
+private val COOKIE_NAME = Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+
+/**
+ * The `Cookie` header for the engine, from the cookies the solver returns. The solver's browser
+ * returns every cookie it holds (third-party ones too), and the engine refuses a header with a
+ * name or value it cannot use or longer than 4096 characters, so only the cookies that belong to
+ * [host] and are well-formed go in, in the order given, until the header is as long as it may be.
+ * Null when nothing is left.
+ */
+internal fun solutionCookieHeader(host: String, cookies: kotlinx.serialization.json.JsonArray, maxLength: Int = 3_800): String? {
+    val parts = ArrayList<String>()
+    var length = 0
+    for (cookie in cookies) {
+        val c = cookie as? kotlinx.serialization.json.JsonObject ?: continue
+        val name = c["name"]?.jsonPrimitive?.contentOrNull ?: continue
+        val value = c["value"]?.jsonPrimitive?.contentOrNull ?: continue
+        val domain = c["domain"]?.jsonPrimitive?.contentOrNull?.trimStart('.')?.lowercase()
+        val h = host.lowercase()
+        if (!domain.isNullOrEmpty() && h != domain && !h.endsWith(".$domain")) continue
+        if (!COOKIE_NAME.matches(name) || value.any { it.code !in 32..126 || it == ';' }) continue
+        val part = "$name=$value"
+        if (length + part.length + 2 > maxLength) continue
+        parts += part
+        length += part.length + 2
+    }
+    return parts.joinToString("; ").ifEmpty { null }
+}
+
 /**
  * Feeds parked Cloudflare challenge tasks to a FlareSolverr-compatible
  * service (plan 3a). Each task is handled once. The solver, this container
@@ -70,7 +98,7 @@ class SolverLoop(
     private val solverUrl: String,
     private val timeoutMs: Long = Config.solverTimeoutMs,
     private val maxConcurrent: Int = Config.solverConcurrency,
-    cooldownMs: Long = Config.solverCooldownMs,
+    private val cooldownMs: Long = Config.solverCooldownMs,
 ) {
     private val handled: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val cooldown = HostCooldown(cooldownMs)
@@ -117,8 +145,13 @@ class SolverLoop(
             for (task in tasks) {
                 if (!handled.add(task.taskId)) continue
                 val host = task.targetUrl.toHttpUrlOrNull()?.host ?: "?"
+                // A challenge is parked at this site: its providers wait for it in the engine (up to a
+                // minute and a half each, holding one of its few search places). Do not start more
+                // of them while it is dealt with. See BlockedHosts.
+                BlockedHosts.blockAtLeast(host, SOLVING_HOLD_MS)
                 if (cooldown.cooling(host)) {
                     println("hless: solve.skipped host=$host (failed recently)")
+                    scope.launch { giveUp(task, host) }
                     continue
                 }
                 started++
@@ -139,8 +172,37 @@ class SolverLoop(
             if (task.userAgent != null) put("userAgent", task.userAgent)
         }
         val solved = withContext(Dispatchers.IO) { requestSolution(task, host, body.toString()) }
-        if (solved == SolveOutcome.SOLVED) cooldown.solved(host)
-        else if (solved == SolveOutcome.REFUSED) cooldown.failed(host)
+        if (solved == SolveOutcome.SOLVED) {
+            cooldown.solved(host)
+            BlockedHosts.unblock(host)
+        } else if (solved == SolveOutcome.REFUSED) {
+            cooldown.failed(host)
+            // The providers of this site are left alone for as long: see BlockedHosts.
+            BlockedHosts.block(host, cooldownMs)
+            giveUp(task, host)
+        } else {
+            // The solver could not be reached at all (a name that does not resolve, a stopped
+            // container). The engine keeps the challenged request waiting for a minute and a half
+            // and holds one of its few search places meanwhile, so the providers of that site are
+            // left alone for a short while instead of being asked again at once.
+            BlockedHosts.block(host, minOf(cooldownMs, 120_000L))
+            giveUp(task, host)
+        }
+    }
+
+    /**
+     * Lets the engine stop waiting. It only takes cookies: it retries the request with these, finds
+     * the challenge still there, and refuses to park that site again for ten minutes, so the
+     * provider fails at once instead of after 90 seconds.
+     */
+    private suspend fun giveUp(task: SolvePendingDto, host: String) {
+        try {
+            client.completeSolve(task.taskId, task.targetUrl, GIVE_UP_COOKIE)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // the task may have expired already; nothing to release then
+        }
     }
 
     private enum class SolveOutcome { SOLVED, REFUSED, UNAVAILABLE }
@@ -165,13 +227,7 @@ class SolverLoop(
             return SolveOutcome.REFUSED
         }
         val solution = root["solution"]?.jsonObject
-        val cookieHeader = solution?.get("cookies")?.jsonArray
-            ?.mapNotNull { cookie ->
-                val c = cookie.jsonObject
-                val name = c["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                "$name=${c["value"]?.jsonPrimitive?.contentOrNull}"
-            }
-            ?.joinToString("; ")
+        val cookieHeader = solution?.get("cookies")?.jsonArray?.let { solutionCookieHeader(host, it) }
         if (cookieHeader.isNullOrEmpty()) {
             println("hless: solve.failed host=$host no cookies in solution")
             return SolveOutcome.REFUSED
@@ -196,5 +252,7 @@ class SolverLoop(
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private const val IDLE_POLL_MS = 750L
+        private const val SOLVING_HOLD_MS = 120_000L
+        private const val GIVE_UP_COOKIE = "hless-giveup=1"
     }
 }

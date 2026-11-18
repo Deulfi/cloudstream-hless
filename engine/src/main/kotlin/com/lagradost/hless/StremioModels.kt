@@ -7,7 +7,9 @@ import kotlinx.serialization.Serializable
 data class StremioStream(
     val name: String,
     val description: String,
-    val url: String,
+    /** The stream; null for a note row, which has [externalUrl] instead. */
+    val url: String? = null,
+    val externalUrl: String? = null,
     val behaviorHints: StreamHints? = null,
     val subtitles: List<StremioSubtitle>? = null,
 )

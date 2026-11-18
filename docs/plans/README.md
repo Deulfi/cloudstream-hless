@@ -25,6 +25,7 @@ the others, except this page. [../PLAN.md](../PLAN.md) is the overview.
 | 5b | [5b-link-probing.md](5b-link-probing.md) | 2e | done |
 | 5c | [5c-coverage-and-latency.md](5c-coverage-and-latency.md) | 2e, 2g | done |
 | 6a | [6a-config-page.md](6a-config-page.md) | 5a, 5b, 5c | done |
+| 7a | [7a-first-answer.md](7a-first-answer.md) | 5c, 6a | done: provider statistics, search order, solver give-up, branding, note row |
 
 2b, 2c and 2d do not depend on each other. 2f changes parts of 2d, so build
 them together or one right after the other. When you finish a plan, change

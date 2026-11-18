@@ -1,9 +1,11 @@
 package com.lagradost.hless
 
+import com.lagradost.macos.models.LinksResponseDto
 import com.lagradost.macos.models.ProviderInfoDto
 import com.lagradost.macos.models.StreamLinkDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -18,7 +20,9 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The StreamService (2e, 5b, 5c, 6a).
@@ -26,9 +30,10 @@ import java.util.concurrent.ConcurrentHashMap
  * The unit of work is one provider for one title: it is started once, kept
  * for a while, and shared by every request that wants it, whatever that
  * request's settings are. A request asks for the providers its settings
- * allow, waits for them (but not for stuck ones, see [settle]), and renders
- * the answer with its own settings. Providers still running when a request
- * answers keep going and are there for the next one.
+ * allow, in the order that gets the useful ones answered first (see [order]),
+ * waits for the ones that matter (see [settle]), and renders the answer with
+ * its own settings. Providers still running when a request answers keep going
+ * and are there for the next one.
  */
 class StreamServiceImpl(
     private val client: EngineClient,
@@ -39,10 +44,23 @@ class StreamServiceImpl(
     private val minWaitMs: Long = Config.minWaitMs,
     private val quietMs: Long = Config.quietMs,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val stats: ProviderStats = ProviderStats(),
+    private val prefetch: Boolean = true,
+    /** How long a search may keep its place in the search gate; a provider that waits for a blocked site must not hold it for a minute. */
+    private val gateHoldMs: Long = 8_000L,
+    /** Which page of which provider belongs to a title; one per process, tests bring their own. */
+    private val matches: MatchCache = MatchCache(HlessStores.matchStore),
 ) : StreamService {
 
     /** One provider's work for one title. */
-    private class ProviderTask(val provider: ProviderRef, startedAt: Long) {
+    private class ProviderTask(
+        val provider: ProviderRef,
+        val info: ProviderInfoDto,
+        val usefulness: Usefulness,
+        startedAt: Long,
+        /** Tasks whose search must be over before this one searches (the dormant providers wait for the useful ones). */
+        val startAfter: List<ProviderTask> = emptyList(),
+    ) {
         /** The latest published links (first without facts, then probed). */
         @Volatile var result: ProviderResult? = null
         @Volatile var lastActivityAt: Long = startedAt
@@ -58,7 +76,17 @@ class StreamServiceImpl(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val tasks = ConcurrentHashMap<String, ProviderTask>()
+
+    /** Link extraction, the heavy part. */
     private val semaphore = Semaphore(16)
+
+    /**
+     * Title searches. The engine runs 8 searches at once and queues the rest in no
+     * useful order; asking for 6 here keeps its queue empty, so the order in which
+     * the providers were started is the order in which they search (the semaphore
+     * is fair).
+     */
+    private val searchGate = Semaphore(SEARCH_GATE)
 
     init {
         scope.launch {
@@ -106,23 +134,59 @@ class StreamServiceImpl(
             } else {
                 provider.tvTypes.any { it in wantedTypes(effectiveType) }
             }
-            hasType && askProvider(provider.name, settings.rank)
+            hasType && askProvider(provider.name, settings.rank) && !BlockedHosts.isBlocked(hostOf(provider.mainUrl))
         }
-        val wanted = providers.map { taskFor("$effectiveType/$id", it, effectiveType, parsedId, info) }
+        val titleKey = "$effectiveType/$id"
+        val wanted = ArrayList<ProviderTask>()
+        for ((provider, usefulness) in order(providers, settings.rank)) {
+            // sorted: the dormant providers come last and wait for all the others to be through their search
+            val before = if (usefulness == Usefulness.DORMANT) wanted.filter { it.usefulness != Usefulness.DORMANT } else emptyList()
+            wanted += taskFor(titleKey, provider, usefulness, effectiveType, parsedId, info, before)
+        }
         evictOldFinished()
-        val complete = settle(wanted, started)
+        val relevant = relevantOf(wanted)
+        val complete = settle(wanted, relevant, started)
         val results = wanted.mapNotNull { it.result }
         val rendered = renderStreams(
             results, titleLine(info, parsedId), info.runtimeMin, settings, StreamMapper.defaultMediaflow,
         )
+        val loading = if (complete) 0 else relevant.count { it.finishedAt == 0L }
         println(
             "hless: $id $effectiveType: ${results.size}/${providers.size} providers answered, " +
                 "${rendered.links} links, ${rendered.streams.size} shown, dropped ${rendered.dropped} " +
                 "in ${String.format(java.util.Locale.ROOT, "%.1f", (clock() - started) / 1000.0)}s " +
                 if (complete) "(complete)" else "(partial, working: ${stillWorking(wanted)})",
         )
-        return StreamResult(rendered.streams, complete)
+        if (prefetch && settings.rank.smart) prefetchNext(effectiveType, parsedId, info, wanted)
+        return StreamResult(
+            rendered.streams, complete, loading,
+            hiddenQuality = (rendered.dropped[DropReason.BELOW_MIN_QUALITY] ?: 0) + (rendered.dropped[DropReason.ABOVE_MAX_QUALITY] ?: 0),
+            hiddenHoster = rendered.dropped[DropReason.HOSTER_OFF] ?: 0,
+        )
     }
+
+    /**
+     * The order in which providers are started, which is the order in which they search:
+     * smart (default) puts the ones that usually find something first, then the unknown
+     * ones, then the ones that never did; within a class, those with more hits come first and
+     * then the person's order. Not smart: exactly the person's order (then the engine's).
+     */
+    private fun order(providers: List<ProviderInfoDto>, rank: RankSettings): List<Pair<ProviderInfoDto, Usefulness>> {
+        val page = rank.order.withIndex().associate { it.value.lowercase() to it.index }
+        fun position(provider: ProviderInfoDto) = page[provider.name.lowercase()] ?: Int.MAX_VALUE
+        val classified = providers.map { it to (if (rank.smart) stats.classify(it.name) else Usefulness.UNKNOWN) }
+        return classified.sortedWith(
+            compareBy<Pair<ProviderInfoDto, Usefulness>>(
+                { it.second.ordinal },
+                { if (rank.smart) -stats.counts(it.first.name).hits else 0 },
+                { position(it.first) },
+            ),
+        )
+    }
+
+    /** The tasks worth waiting for: all but the dormant ones (unless nothing else is left). */
+    private fun relevantOf(wanted: List<ProviderTask>): List<ProviderTask> =
+        wanted.filter { it.usefulness != Usefulness.DORMANT }.ifEmpty { wanted }
 
     /**
      * hless ids (3b): one provider's title. No task cache: details and links
@@ -151,6 +215,25 @@ class StreamServiceImpl(
         return StreamResult(rendered.streams, true)
     }
 
+    /**
+     * After an episode: the providers that just delivered it start on the next one, so that
+     * its streams are usually ready when it is opened. Only those providers (the match cache
+     * already knows their page, so it costs details and links), and not under load.
+     */
+    private fun prefetchNext(type: String, id: StremioId, info: TitleInfo, answered: List<ProviderTask>) {
+        val imdb = id.imdb ?: return
+        val season = id.season ?: return
+        val episode = id.episode ?: return
+        if (tasks.values.count { it.finishedAt == 0L } >= MAX_RUNNING / 2) return
+        val delivered = answered.filter { it.hasLinks }
+        if (delivered.isEmpty()) return
+        val next = id.copy(episode = episode + 1)
+        val titleKey = "$type/$imdb:$season:${episode + 1}"
+        scope.launch {
+            for (task in delivered) taskFor(titleKey, task.info, task.usefulness, type, next, info)
+        }
+    }
+
     /** Keeps at most [MAX_TASKS] finished tasks, dropping the ones that finished longest ago. */
     private fun evictOldFinished() {
         val excess = tasks.size - MAX_TASKS
@@ -169,18 +252,41 @@ class StreamServiceImpl(
     private fun taskFor(
         titleKey: String,
         provider: ProviderInfoDto,
+        usefulness: Usefulness,
         type: String,
         parsedId: StremioId,
         info: TitleInfo,
+        startAfter: List<ProviderTask> = emptyList(),
     ): ProviderTask {
         val key = "$titleKey|${provider.providerId}"
         val now = clock()
-        val fresh = ProviderTask(ProviderRef(provider.name, provider.providerId, provider.language), now)
+        val fresh = ProviderTask(ProviderRef(provider.name, provider.providerId, provider.language), provider, usefulness, now, startAfter)
         val chosen = tasks.compute(key) { _, current -> if (current != null && isFresh(current, now)) current else fresh }!!
         if (chosen === fresh) {
-            fresh.job = scope.launch { runProvider(fresh, provider, type, parsedId, info) }
+            // Undispatched: the task queues for the search gate right here, so the gate's queue
+            // is in the order the providers were started.
+            fresh.job = scope.launch(start = CoroutineStart.UNDISPATCHED) { runProvider(fresh, provider, type, parsedId, info) }
         }
         return chosen
+    }
+
+    /** Holds a search place for at most [gateHoldMs]. */
+    private suspend fun <T> gated(block: suspend () -> T): T = coroutineScope {
+        searchGate.acquire()
+        val released = AtomicBoolean(false)
+        fun release() {
+            if (released.compareAndSet(false, true)) searchGate.release()
+        }
+        val timer = launch {
+            delay(gateHoldMs)
+            release()
+        }
+        try {
+            block()
+        } finally {
+            timer.cancel()
+            release()
+        }
     }
 
     private suspend fun runProvider(
@@ -190,27 +296,41 @@ class StreamServiceImpl(
         parsedId: StremioId,
         info: TitleInfo,
     ) {
+        if (task.startAfter.isNotEmpty()) {
+            // Not worth a search place until the useful providers have had theirs (but do not wait for ever).
+            withTimeoutOrNull(DORMANT_WAIT_MS) {
+                while (task.startAfter.any { it.phase == "search" && it.finishedAt == 0L }) delay(POLL_MS)
+            }
+        }
+        var recorded = false
+        fun record(outcome: SearchOutcome) {
+            if (!recorded) {
+                recorded = true
+                stats.record(provider.name, outcome)
+            }
+        }
         try {
             withTimeout(PROVIDER_TIMEOUT_MS) {
-                // Finding the title is mostly waiting (a blocked site can wait for the solver for
-                // a minute), so it takes no permit: stuck providers must not starve the others.
-                // Only the link extraction, the heavy part, is limited.
-                val data = resolveData(client, provider.providerId, type, parsedId, info, timeoutMs = 20_000)
-                    ?: return@withTimeout
+                val data = gated {
+                    resolveData(client, provider.providerId, type, parsedId, info, timeoutMs = 20_000, cache = matches, onOutcome = ::record)
+                } ?: return@withTimeout
                 task.matched = true
                 task.phase = "links"
                 task.lastActivityAt = clock()
                 val response = semaphore.withPermit { client.links(provider.providerId, data, budgetMs = 25_000) }
+                response.links.map { it.source }.distinct().forEach(stats::noteHoster)
                 // Publish the links at once, so a slow probe never costs a stream at the deadline.
                 task.phase = "probe"
                 publish(task, response.links.map { Item(it) }, response)
                 publish(task, probeAll(response.links), response)
             }
         } catch (e: TimeoutCancellationException) {
+            record(SearchOutcome.FAIL)
             println("hless: ${provider.name} timed out")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            record(SearchOutcome.FAIL)
             val code = (e as? EngineException)?.code
             println("hless: ${provider.name} failed: ${e.javaClass.simpleName}${code?.let { " ($it)" }.orEmpty()}")
         } finally {
@@ -220,7 +340,7 @@ class StreamServiceImpl(
         }
     }
 
-    private fun publish(task: ProviderTask, items: List<Item>, response: com.lagradost.macos.models.LinksResponseDto) {
+    private fun publish(task: ProviderTask, items: List<Item>, response: LinksResponseDto) {
         task.result = ProviderResult(task.provider, items, response.subtitles)
         task.lastActivityAt = clock()
     }
@@ -231,27 +351,26 @@ class StreamServiceImpl(
     }
 
     /**
-     * Waits for [wanted] but not for providers that are clearly stuck. Answers when
+     * Waits for the providers that matter. Answers when
      *  1. every provider is done: complete; or
-     *  2. the deadline passed; or
-     *  3. the minimum wait passed, at least one provider has links, no provider
-     *     that already found the title is still fetching its links, and nothing
-     *     has happened for the quiet period.
-     * A provider that has not found the title after that long (a blocked site,
-     * a news channel searched for a film) is not worth waiting for; one that
-     * has found it is. The providers still running are not cancelled; they
-     * fill the cache for the next request. Returns whether the answer is
-     * complete.
+     *  2. every [relevant] provider is done (the dormant ones keep going for the next request); or
+     *  3. the deadline passed; or
+     *  4. the minimum wait passed, at least one provider has links, no provider that
+     *     usually delivers is still working, none that already found the title is
+     *     still fetching its links, and nothing has happened for the quiet period.
+     * Returns whether every provider is done.
      */
-    private suspend fun settle(wanted: List<ProviderTask>, started: Long): Boolean {
+    private suspend fun settle(wanted: List<ProviderTask>, relevant: List<ProviderTask>, started: Long): Boolean {
         while (true) {
             if (wanted.all { it.finishedAt != 0L }) return true
+            if (relevant.all { it.finishedAt != 0L }) return false
             val now = clock()
             val elapsed = now - started
             if (elapsed >= deadlineMs) return false
-            val working = wanted.any { it.matched && it.finishedAt == 0L }
-            if (!working && elapsed >= minWaitMs && wanted.any { it.hasLinks } &&
-                now - wanted.maxOf { it.lastActivityAt } >= quietMs
+            val likelyWorking = relevant.any { it.usefulness == Usefulness.LIKELY && it.finishedAt == 0L }
+            val working = relevant.any { it.matched && it.finishedAt == 0L }
+            if (!likelyWorking && !working && elapsed >= minWaitMs && relevant.any { it.hasLinks } &&
+                now - relevant.maxOf { it.lastActivityAt } >= quietMs
             ) return false
             delay(POLL_MS)
         }
@@ -260,9 +379,11 @@ class StreamServiceImpl(
     /** Provider names and phases of the tasks that did not finish, for the log; at most eight, matched ones first. */
     private fun stillWorking(wanted: List<ProviderTask>): String {
         val running = wanted.filter { it.finishedAt == 0L }.sortedByDescending { it.matched }
-        val shown = running.take(8).joinToString(",") { "${it.provider.name}:${it.phase}" }
+        val shown = running.take(8).joinToString(",") { "${it.provider.name}:${it.phase}${it.usefulness.name.first()}" }
         return if (running.size > 8) "$shown,+${running.size - 8}" else shown
     }
+
+    private fun hostOf(url: String): String? = url.toHttpUrlOrNull()?.host
 
     private fun titleLine(info: TitleInfo, id: StremioId): String {
         val name = info.names.firstOrNull().orEmpty()
@@ -285,5 +406,7 @@ class StreamServiceImpl(
         private const val MAX_RUNNING = 150
         private const val MAX_TASKS = 1_000
         private const val POLL_MS = 100L
+        private const val SEARCH_GATE = 6
+        private const val DORMANT_WAIT_MS = 25_000L
     }
 }

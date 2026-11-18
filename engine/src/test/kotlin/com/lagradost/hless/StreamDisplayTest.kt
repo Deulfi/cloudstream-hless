@@ -33,7 +33,7 @@ class StreamDisplayTest {
     @Test
     fun `golden example, a direct file`() {
         val d = data(listOf(1080), "VIDEO", "Kellerkino", "DoodStream", size = 2_070_000_000L, kbps = 1840)
-        assertEquals("hless\n🎬 1080p 🇩🇪\nKellerkino", renderName(d, display))
+        assertEquals("大 Hless\n🎬 1080p 🇩🇪\nKellerkino", renderName(d, display))
         assertEquals(
             "🎬 Spider-Man: Brand New Day (2026)\n📺 1080p • Direct\n🔗 Kellerkino • DoodStream\n💾 2.07 GB · ~1.8 Mbps",
             renderDescription(d, display),
@@ -43,7 +43,7 @@ class StreamDisplayTest {
     @Test
     fun `golden example, an HLS master with three variants`() {
         val d = data(listOf(800, 720, 480), "M3U8", "Megakino", "Voe", kbps = 2642)
-        assertEquals("hless\n🎬 800p 🇩🇪\nMegakino", renderName(d, display))
+        assertEquals("大 Hless\n🎬 800p 🇩🇪\nMegakino", renderName(d, display))
         assertEquals(
             "🎬 Spider-Man: Brand New Day (2026)\n📺 800p · 720p · 480p • HLS\n🔗 Megakino • Voe\n💾 ~2.6 Mbps",
             renderDescription(d, display),
@@ -53,7 +53,7 @@ class StreamDisplayTest {
     @Test
     fun `golden example, unknown quality and a source equal to the provider`() {
         val d = data(emptyList(), "VIDEO", "FilmFrei24", "FilmFrei24", size = 7_900_000_000L, kbps = 7022)
-        assertEquals("hless\n🎬 Auto 🇩🇪\nFilmFrei24", renderName(d, display))
+        assertEquals("大 Hless\n🎬 Auto 🇩🇪\nFilmFrei24", renderName(d, display))
         assertEquals(
             "🎬 Spider-Man: Brand New Day (2026)\n📺 Auto • Direct\n🔗 FilmFrei24\n💾 7.90 GB · ~7.0 Mbps",
             renderDescription(d, display),
@@ -63,8 +63,8 @@ class StreamDisplayTest {
     @Test
     fun `flag modes and icons`() {
         val d = data(listOf(1080), "VIDEO", "Kellerkino", "DoodStream")
-        assertEquals("hless\n🎬 1080p DE\nKellerkino", renderName(d, DisplaySettings(flags = FlagMode.CODE)))
-        assertEquals("hless\n🎬 1080p\nKellerkino", renderName(d, DisplaySettings(flags = FlagMode.NONE)))
+        assertEquals("大 Hless\n🎬 1080p DE\nKellerkino", renderName(d, DisplaySettings(flags = FlagMode.CODE)))
+        assertEquals("大 Hless\n🎬 1080p\nKellerkino", renderName(d, DisplaySettings(flags = FlagMode.NONE)))
         assertEquals("mine\n1080p 🇩🇪\nKellerkino", renderName(d, DisplaySettings(label = "mine", icons = false)))
         assertEquals(
             "Spider-Man: Brand New Day (2026)\n1080p • Direct\nKellerkino • DoodStream",

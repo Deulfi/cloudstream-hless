@@ -22,6 +22,7 @@ class PrefsTest {
         val prefs = Prefs(
             langs = listOf("de", "en"), minH = 720, maxH = 1080, off = listOf("A"), first = listOf("B"),
             sort = "size", perProv = 3, total = 20, variants = "all", flags = "code", icons = false, proxy = false,
+            order = listOf("B", "A"), smart = false, hostOff = listOf("Voe"), hint = false,
         )
         assertEquals(prefs, decodePrefs(encodePrefs(prefs)))
     }
@@ -42,7 +43,7 @@ class PrefsTest {
         assertNull(decodePrefs(segment("""[1,2,3]""")))
         assertNull(decodePrefs("A".repeat(3_001)))
         // Short as text, but more than 2 KiB once decoded.
-        assertNull(decodePrefs(segment("""{"off":["${"a".repeat(2_100)}"]}""")))
+        assertNull(decodePrefs(segment("""{"off":["${"a".repeat(3_100)}"]}""")))
     }
 
     @Test
@@ -109,5 +110,21 @@ class PrefsTest {
         assertEquals(1 + 60, rank.providersDeny.size)
         assertEquals(60, rank.providersFirst.size)
         assertEquals(40, Prefs(first = listOf("x".repeat(100))).resolve(defaults).rank.providersFirst.single().length)
+    }
+
+    @Test
+    fun `provider order, smart ordering, hosters and the note are read and bounded`() {
+        val settings = Prefs(order = listOf("B", "A", " "), smart = false, hostOff = listOf("Voe", "DoodStream"), hint = false).resolve(defaults)
+        assertEquals(listOf("B", "A"), settings.rank.order)
+        assertEquals(false, settings.rank.smart)
+        assertEquals(listOf("Voe", "DoodStream"), settings.rank.hostersOff)
+        assertEquals(false, settings.hint)
+        val many = (1..300).map { "p$it" }
+        val bounded = Prefs(order = many, hostOff = many).resolve(defaults).rank
+        assertEquals(100, bounded.order.size)
+        assertEquals(100, bounded.hostersOff.size)
+        // not given: the server's values stay
+        assertEquals(true, Prefs().resolve(defaults).rank.smart)
+        assertEquals(true, Prefs().resolve(defaults).hint)
     }
 }
