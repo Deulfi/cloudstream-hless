@@ -21,6 +21,10 @@ the others, except this page. [../PLAN.md](../PLAN.md) is the overview.
 | 3d | [3d-anime-kitsu.md](3d-anime-kitsu.md) | 2e, 2f | done |
 | 3e | [3e-webview-extractors.md](3e-webview-extractors.md) | 2e | not needed (step 0: no web-view usage in the installed extensions) |
 | 4a | [4a-upstream-sync.md](4a-upstream-sync.md) | nothing | done, except the first workflow run on GitHub |
+| 5a | [5a-stream-display.md](5a-stream-display.md) | 2e, 2g | not started: `400p` shown for unknown quality, one-line name, repeated source, wrong flags |
+| 5b | [5b-link-probing.md](5b-link-probing.md) | 2e | not started: real resolutions, sizes, folding of duplicate variants |
+| 5c | [5c-coverage-and-latency.md](5c-coverage-and-latency.md) | 2e, 2g | not started: cap of 4 per provider hid 3 of 15 links; first request always takes the full deadline |
+| 6a | [6a-config-page.md](6a-config-page.md) | 5a, 5b, 5c | later: preferences page, per-request settings |
 
 2b, 2c and 2d do not depend on each other. 2f changes parts of 2d, so build
 them together or one right after the other. When you finish a plan, change
@@ -32,7 +36,17 @@ Without 2f, providers that are not in English find almost nothing.
 Environment variables are defined in the plan that introduces them; `Config`
 (2a) holds all of them. Full list: 2a (core), 2f (`HLESS_TMDB_KEY`,
 `HLESS_LANGS`), 2g (ordering and provider filters), 3a (solver), 3d
-(`HLESS_ANIME_AUDIO`), 3e (`HLESS_BROWSER_URL`).
+(`HLESS_ANIME_AUDIO`), 3e (`HLESS_BROWSER_URL`), 5a (`HLESS_LABEL`,
+`HLESS_FLAGS`, `HLESS_ICONS`), 5b (`HLESS_VARIANTS`), 5c
+(`HLESS_MIN_WAIT_MS`, `HLESS_QUIET_MS`).
+
+The 5x plans come from comparing the running addon with another bridge on the
+same repository (2026-11-18). Order: 5a (cheap and visible, needs nothing
+else), 5c (cap and latency), 5b (probing), then 6a. 5a prints `Auto` where it
+has no resolution; 5b is what fills it in.
+
+`scripts/title_links.py` shows what the engine returns for one title, so
+"fewer streams than expected" can be checked in minutes (see 5c, section 5).
 
 ## Rules for every plan
 
