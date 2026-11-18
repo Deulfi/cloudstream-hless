@@ -90,3 +90,23 @@ lists the variants of a master as separate rows (12 against our 9 for one film);
   `HLESS_DEADLINE_MS`.
 - The engine's own wait for challenged requests cannot be changed from here
   (it is an upstream file); the give-up cookie above is the only lever.
+
+## Found afterwards: series listed as movies (2026-11-18)
+
+Fallout and Harry Potter against the other bridge. Films matched; for Fallout we
+found only KinoKing, the other bridge also Filmpalast and Megakino. Cause, in our
+matcher and not in the providers: Filmpalast lists every **episode** as its own
+`Movie` result (`Fallout S01E04`, links in `movieData`), and Megakino lists every
+**season** as a `Movie` result (`Fallout - Staffel 1`, whose details hold the
+episodes without season numbers). Both were thrown away for a series.
+
+`pickSeriesEntry` / `listsEpisodes` / `pickSeasonEntryEpisode` (TitleMatcher.kt)
+accept those two shapes; `resolveData` remembers them per season
+(`<imdb>:S1`) and per episode (`<imdb>:S1E4`) and asks for `Name S01E04` when a
+site lists episodes one by one but cut the list. After the fix the same Fallout
+episodes return Filmpalast, KinoKing and Megakino.
+
+Not a bug of ours: Xcine (the other bridge's own extension, not in our repo).
+Open: Serienstream matches Fallout but yields no links here; the other bridge
+gets two (not looked into).
+

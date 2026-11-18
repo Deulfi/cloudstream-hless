@@ -79,4 +79,22 @@ class ResolverTest {
         assertEquals("data", resolveData(client, "p", "movie", id, info, 5_000, cache))
         assertEquals(1, client.searches.get())
     }
+
+    @Test
+    fun `an episode listed as its own movie entry is found and remembered per episode`() = runBlocking {
+        val results = listOf(
+            SearchResultDto(name = "Fallout S01E04", url = "https://p/e4", provider = "p", type = "Movie"),
+            SearchResultDto(name = "Fallout S01E05", url = "https://p/e5", provider = "p", type = "Movie"),
+        )
+        val client = SearchClient(results)
+        val cache = cache()
+        val fallout = TitleInfo(listOf("Fallout"), 2024)
+        val ep4 = StremioId("tt2", null, 1, 4)
+        assertEquals("data", resolveData(client, "p", "series", ep4, fallout, 5_000, cache))
+        assertEquals("data", resolveData(client, "p", "series", ep4, fallout, 5_000, cache))
+        assertEquals(1, client.searches.get())
+        assertNull(resolveData(client, "p", "series", StremioId("tt2", null, 1, 9), fallout, 5_000, cache))
+        assertEquals(MatchCache.Entry.Absent, cache.lookup("tt2", "p"))
+    }
 }
+

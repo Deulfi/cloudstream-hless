@@ -131,4 +131,32 @@ class TitleMatcherTest {
         val d = details(listOf(ep("special", 0, 1), ep("e1", 1, 1)))
         assertEquals("e1", pickAnimeEpisode(d, "Cowboy Bebop", null, 1)?.data)
     }
+
+    @Test
+    fun `an entry per episode is found, typed as a movie`() {
+        val info = TitleInfo(listOf("Fallout"), 2024)
+        val results = listOf(result("The Fallout"), result("Fallout S02E04"), result("Fallout S01E04"), result("Mission: Impossible - Fallout *2018*"))
+        val m = pickSeriesEntry(info, results, 1, 4)
+        assertEquals("Fallout S01E04", m?.result?.name)
+        assertEquals(EntryKind.EPISODE, m?.kind)
+        assertNull(pickSeriesEntry(info, results, 1, 5))
+        assertEquals(true, listsEpisodes(info, results))
+    }
+
+    @Test
+    fun `an entry per season is found, other titles with the same words are not`() {
+        val info = TitleInfo(listOf("Fallout"), 2024)
+        val results = listOf(result("Fallout - Staffel 2"), result("Fallout - Staffel 1"), result("Fallout 4 - Staffel 1"))
+        val m = pickSeriesEntry(info, results, 1, 3)
+        assertEquals("Fallout - Staffel 1", m?.result?.name)
+        assertEquals(EntryKind.SEASON, m?.kind)
+        assertNull(pickSeriesEntry(info, results, 3, 1))
+    }
+
+    @Test
+    fun `the episode of a season entry may carry no season number`() {
+        val d = details(listOf(ep("e1", null, 1), ep("e2", null, 2)))
+        assertEquals("e2", pickSeasonEntryEpisode(d, 2, 2)?.data)
+        assertNull(pickSeasonEntryEpisode(d, 2, 9))
+    }
 }

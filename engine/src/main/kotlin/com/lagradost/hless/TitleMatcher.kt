@@ -81,6 +81,55 @@ fun pickMatch(
     return if (bestScore >= 60) best else null
 }
 
+/** How a provider lists a series: as one entry, one entry per season, or one entry per episode. */
+enum class EntryKind { SERIES, SEASON, EPISODE }
+
+class EntryMatch(val result: SearchResultDto, val kind: EntryKind)
+
+private val EPISODE_SUFFIX = Regex("""^(.*?)[\s\-–:]*s(\d{1,2})\s*e(\d{1,3})\s*$""", RegexOption.IGNORE_CASE)
+private val SEASON_SUFFIX = Regex("""^(.*?)[\s\-–:]*(?:staffel|season|saison)\s*(\d{1,2})\s*$""", RegexOption.IGNORE_CASE)
+
+private fun baseMatches(info: TitleInfo, base: String, resultYear: Int?): Boolean {
+    val normalized = normalize(base)
+    if (normalized.isEmpty() || info.names.none { normalize(it) == normalized }) return false
+    val infoYear = info.year
+    return resultYear == null || infoYear == null || kotlin.math.abs(resultYear - infoYear) < 2
+}
+
+/**
+ * Some providers list a series as one entry per episode ("Fallout S01E04") or per season
+ * ("Fallout - Staffel 1"), often typed as a movie. Returns the entry that is the wanted episode,
+ * or else the wanted season; null when the results hold neither.
+ */
+fun pickSeriesEntry(info: TitleInfo, results: List<SearchResultDto>, season: Int, episode: Int): EntryMatch? {
+    var seasonEntry: EntryMatch? = null
+    for (r in results) {
+        EPISODE_SUFFIX.find(r.name.trim())?.let { m ->
+            if (m.groupValues[2].toInt() == season && m.groupValues[3].toInt() == episode &&
+                baseMatches(info, m.groupValues[1], r.year)
+            ) return EntryMatch(r, EntryKind.EPISODE)
+        }
+        if (seasonEntry == null) {
+            SEASON_SUFFIX.find(r.name.trim())?.let { m ->
+                if (m.groupValues[2].toInt() == season && baseMatches(info, m.groupValues[1], r.year)) {
+                    seasonEntry = EntryMatch(r, EntryKind.SEASON)
+                }
+            }
+        }
+    }
+    return seasonEntry
+}
+
+/** True when the results list this title's episodes one by one (so a search for a single one may help). */
+fun listsEpisodes(info: TitleInfo, results: List<SearchResultDto>): Boolean =
+    results.any { r -> EPISODE_SUFFIX.find(r.name.trim())?.let { baseMatches(info, it.groupValues[1], r.year) } == true }
+
+/** The episode of a per-season entry: its episodes often carry no season number. */
+fun pickSeasonEntryEpisode(details: DetailsDto, season: Int, episode: Int): EpisodeDto? {
+    val pool = details.episodes.filter { it.episode == episode && (it.season == null || it.season == season) }
+    return pool.firstOrNull { it.audio == "sub" } ?: pool.firstOrNull { it.audio == null } ?: pool.firstOrNull()
+}
+
 /**
  * Finds the episode to hand to /links:
  * 1. an entry with this season and episode number;
