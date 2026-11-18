@@ -114,3 +114,30 @@ the loop starts after engine readiness and polls `/solve/pending` without
 errors; the solver answers `/v1`. The full "Done when" has not occurred
 yet: none of the installed providers hit a Cloudflare challenge on demand,
 so no `solve.completed` has been logged.
+
+## Findings (2026-11-18)
+
+The solver's own history showed the same host (`kinoger.com`) failing again
+and again: `ChallengeNotSolvedError` after 12-15 s, and `CancelledError` after
+exactly 15.0 s. The 15 s is the solver's own limit, not a timeout of ours (our
+HTTP call allows `maxTimeout` plus 25 s). Nothing in the loop can make an
+unsolvable site solvable, so the loop was changed to stop wasting the
+solver's single worker on it:
+
+- **Per-host cooldown.** A host the solver refused is left alone for ten
+  minutes (`HLESS_SOLVER_COOLDOWN_MS`); its tasks expire in the engine by
+  themselves. A host that is solved is forgotten at once. (`HostCooldown`.)
+- **Concurrency follows the solver.** `HLESS_SOLVER_CONCURRENCY` if set, else
+  the `workers` the solver reports on `/health` (1 for the maintainer's),
+  else 2. Two parallel requests to a one-worker solver only queue.
+- **No busy loop.** The engine answers `/solve/pending` at once while any task
+  is pending, including ones already being solved or skipped; the loop used to
+  spin on that. It now waits 750 ms when it started nothing.
+- **A task is handled once**, and the set of handled tasks was a plain
+  `HashSet` used from several threads; it is a concurrent set now.
+- **Logs name the host, not the URL.**
+
+Not done: telling the engine that a solve failed, so it can stop waiting. The
+engine has no call for that (`/solve-callback` only takes cookies), and it
+would need a change in an upstream file. A provider behind such a host costs up
+to the 45 s provider limit; the request itself is not held that long (see 5c).

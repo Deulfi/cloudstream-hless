@@ -5,6 +5,16 @@ start before those are done**: this plan moves their settings from process
 start to every request, so it should change finished code once, not code that
 is still moving.
 
+**State: done 2026-11-18** (`Prefs.kt`, `Settings.kt`, `AddonServer.kt`,
+`engine/src/main/resources/hless/configure.html`; tests `PrefsTest`,
+`AddonServerTest`, `StreamServiceImplTest`). Checked in a browser against the
+test container: the page loads, the generated link decodes to the chosen
+preferences, the server accepts it, and a provider switched off disappears
+from that link's catalogs. Differences from the text below: `Settings` wraps
+`RankSettings`, `DisplaySettings`, `Variants` and `proxy`; `/api/server` also
+returns `denied` (providers the server forbids; they are not offered on the
+page); the proxy switch only shows when the server has MediaFlow.
+
 ## What the maintainer asked for
 
 A small page, like most Stremio addons have: big server-wide things (the

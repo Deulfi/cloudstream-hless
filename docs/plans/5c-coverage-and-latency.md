@@ -3,6 +3,11 @@
 Read [README.md](README.md) first. Depends on: 2e, 2g. Independent of 5a and
 5b, but the cap change in step 1 assumes 5b's folding.
 
+**State: done 2026-11-18** (`StreamServiceImpl.kt`, `StreamRanker.kt`,
+`AddonServer.kt`; tests `StreamServiceImplTest`, `StreamRankerTest`,
+`AddonServerTest`). Read "Correction and findings" at the end first: one claim
+below turned out wrong, and the early-answer rule needed a second condition.
+
 ## Why this plan exists
 
 Measured on 2026-11-18 with a film that five providers have, comparing the
@@ -18,8 +23,8 @@ engine's raw answer with what the addon returned
 Every dropped link was dropped by one rule, the cap of 4 streams per
 provider: Megakino lost its fifth link, Filmpalast its fifth and sixth. No
 link was lost to split audio, DRM or an invalid URL (the script counts
-those: 0 of 15). The other bridge shows more entries mainly because it has no
-such cap and splits one host into several quality entries.
+those: 0 of 15). (Correction below: the other bridge shows the same number of
+entries, not more.)
 
 Latency: a film requested for the first time took **15.1 s**, which is
 exactly `HLESS_DEADLINE_MS`. Some provider (the Cloudflare-protected ones
@@ -172,3 +177,31 @@ Tests pass, and on the test container the same film as above:
 - answers in well under the 15 s deadline when only the Cloudflare-protected
   providers are slow;
 - a second request right after is instant.
+
+## Correction and findings (2026-11-18)
+
+- **The other bridge does not show more streams.** Asked for the same film,
+  it answered 12 streams, as the addon did. The screenshots only looked
+  richer because of the information in each entry (5a, 5b). The cap of 4 still
+  hid 3 of 15 raw links, and the defaults are now 6 and 40.
+- **Answering early needed a second condition.** First version: answer once
+  the minimum wait passed, one stream exists, and nothing happened for the
+  quiet period. On the test container that answered after 6 s with 4 of 12
+  streams, because Megakino and Filmpalast take 9-12 s (search, links, probes)
+  and were quiet in between. Now a provider that **has found the title and is
+  still fetching or probing its links** is waited for, up to the deadline. A
+  provider that has not found the title (a blocked site, a news channel
+  searched for a film) does not hold the answer.
+- **Log line per request**, with what was left out and who was still working:
+  `hless: tt22084616 movie: 5/24 providers answered, 15 links, 11 shown, dropped {} in 15.2s (partial, working: Kinoger:search,Moflix:search)`.
+  Phases are `search`, `links`, `probe`. Only names, counts and reasons.
+- **Latency is what the providers need.** A cold title took 10-15 s on the test
+  container; the two Cloudflare-protected providers were the only ones left at
+  the end, and the answer waited for the last active provider plus the quiet
+  period. `HLESS_QUIET_MS` now defaults to 2000 (was 3000 in this plan).
+  A second request for the same title is answered from the cache within a
+  second.
+- **Provider work is cached per provider and title**, not per title, so
+  requests with different settings (6a) share it. A task with streams lives 5
+  minutes, one without 30 seconds, one still running until it ends (45 s at
+  most).

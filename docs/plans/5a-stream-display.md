@@ -4,6 +4,13 @@ Read [README.md](README.md) first. Depends on: 2e, 2g. Best together with
 [5b](5b-link-probing.md) (real resolutions, sizes), but every rule here works
 without it: pass `facts = null` until 5b exists.
 
+**State: done 2026-11-18** (`StreamDisplay.kt`, `StreamMapper.kt`, `StreamRanker.kt`;
+tests `StreamDisplayTest`, `StreamMapperTest`, `StreamRankerTest`). Checked live on
+the test container: the list for the film in the next section shows no `400p`, the
+three-line names and the description lines below. Deviations from the text below:
+`Candidate` also carries `lowQuality` and `sizeBytes`, and the mapper returns
+`MapResult` (a stream or a `DropReason`) instead of null.
+
 ## Why this plan exists
 
 Checked on 2026-11-18 against the running addon (film with five German

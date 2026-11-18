@@ -4,6 +4,11 @@ Read [README.md](README.md) first. Depends on: 2e. Feeds
 [5a](5a-stream-display.md) (labels) and [2g](2g-stream-ordering.md)
 (ordering).
 
+**State: done 2026-11-18** (`LinkFacts.kt`, `SafeFetch.kt`, `LinkProbe.kt`,
+`LinkFolding.kt`; tests `LinkFactsTest`, `SafeFetchTest`, `LinkProbeTest`,
+`LinkFoldingTest`, `StreamPipelineTest`). See "Findings" at the end for what the
+live run showed and what changed from the text below.
+
 ## Why this plan exists
 
 The engine reports a `quality` for each link, but it is only what the
@@ -231,3 +236,30 @@ direct files. Compare with `scripts/title_links.py --probe`, which prints
 what each probe should find.
 
 ## Findings
+
+- **Heights are quality classes, not pixel rows.** A master's variant
+  `1920x800` is what a "1080p" scope film really is, and the other bridge labels
+  it 1080p. `qualityClass(width, height)` (in `LinkFacts.kt`) maps a picture size
+  to 144/240/360/480/720/1080/1440/2160 by width **or** height, whichever
+  reaches the higher class. So the Megakino master reads
+  `1080p · 720p · 480p`, not `800p · 720p · 480p`. Wherever the text above says
+  "heights" for a master, read "quality classes". Links that are not probed keep
+  the number the extension gave.
+- **Probing costs time.** On the test container (2 slow cores) the probe phase
+  was what kept the first answer at the deadline. Final settings: per probe
+  3 s (`SafeFetch`: connect 2 s, read 3 s, whole call 3 s; `LinkProbe`
+  3 s), at most 16 probes at once, and 4 s per provider for all its probes
+  together; a probe that is not done is simply shown without facts.
+- **Failures are logged, once per host per ten minutes**, with the stage the
+  call reached and the milliseconds, never a URL
+  (`hless: probe failed host=x: InterruptedIOException, call@0 dns@0 dns done@5043 now@5043`).
+  What this showed on the test container: some hosts answer a `HEAD` in
+  0.1 s, others stall because of a name lookup that took 5 s once, a response
+  that never came (a media playlist of 2600 segments), or a server that was
+  simply slow at that moment. None of it was a bug in the probe.
+- **Not folded without a confirmed master**, as designed. In the live list the
+  duplicates that remain are exactly the links whose master probe failed.
+- **Bitrate** is shown for a file when a runtime is known (median of the VOD
+  media playlists seen, else TMDB's `runtime`) and for a master from its
+  `AVERAGE-BANDWIDTH` or `BANDWIDTH`; the numbers match the other bridge's
+  (`7.90 GB · ~7.3 Mbps` for the same file).
