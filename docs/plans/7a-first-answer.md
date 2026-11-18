@@ -107,6 +107,8 @@ site lists episodes one by one but cut the list. After the fix the same Fallout
 episodes return Filmpalast, KinoKing and Megakino.
 
 Not a bug of ours: Xcine (the other bridge's own extension, not in our repo).
-Open: Serienstream matches Fallout but yields no links here; the other bridge
-gets two (not looked into).
-
+Serienstream matches Fallout (16 episodes listed) but its links call is flaky:
+the engine itself answers `provider_no_data` for some episodes and not others,
+also when called directly without Hless, and it varies over time (site or
+hoster throttling, not ours). No change made; a single retry on `provider_no_data`
+was considered and left out.
