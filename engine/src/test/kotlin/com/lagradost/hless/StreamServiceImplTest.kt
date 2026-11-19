@@ -96,10 +96,11 @@ class StreamServiceImplTest {
         prefetch: Boolean = false,
         gateHoldMs: Long = 8_000L,
         matches: MatchCache = freshMatches(),
+        emptyWaitMs: Long = 0,
     ) = StreamServiceImpl(
         client, titles = FakeTitles(), prober = NoProbe,
         deadlineMs = deadlineMs, minWaitMs = minWaitMs, quietMs = quietMs, clock = clock,
-        stats = stats, prefetch = prefetch, gateHoldMs = gateHoldMs, matches = matches,
+        stats = stats, prefetch = prefetch, gateHoldMs = gateHoldMs, matches = matches, emptyWaitMs = emptyWaitMs,
     ).also { services += it }
 
     private fun freshMatches() =
@@ -454,5 +455,42 @@ class StreamServiceImplTest {
         val next = service.streams("series", "tt0000035:1:2", Settings())
         assertEquals(1, next.streams.size)
         assertEquals(2, fake.linkData.size)
+    }
+
+    @Test
+    fun `an empty answer waits past the deadline for the first link`() = runBlocking {
+        val fake = FakeClient(
+            providers = listOf(provider("slow")),
+            linksDelayMs = mapOf("slow" to 1_500L),
+            links = mapOf("slow" to listOf(link("https://slow.example/stream"))),
+        )
+        val service = service(fake, deadlineMs = 500, minWaitMs = 100, quietMs = 100, emptyWaitMs = 5_000)
+        val result = service.streams("movie", "tt0000041", Settings())
+        assertEquals(listOf("https://slow.example/stream"), result.streams.map { it.url })
+    }
+
+    @Test
+    fun `the extra wait for an empty answer ends`() = runBlocking {
+        val fake = FakeClient(providers = listOf(provider("stuck")), linksDelayMs = mapOf("stuck" to 60_000L))
+        val service = service(fake, deadlineMs = 300, minWaitMs = 100, quietMs = 100, emptyWaitMs = 600)
+        val started = System.currentTimeMillis()
+        val result = service.streams("movie", "tt0000042", Settings())
+        assertEquals(0, result.streams.size)
+        assertTrue(System.currentTimeMillis() - started in 800..4_000)
+    }
+
+    @Test
+    fun `providers in a language that was not picked search last and are not waited for`() = runBlocking {
+        val tamil = provider("tamil").copy(language = "ta")
+        val fake = FakeClient(
+            providers = listOf(tamil, provider("english")),
+            searchDelayMs = mapOf("tamil" to 60_000L),
+            links = mapOf("english" to listOf(link("https://english.example/stream"))),
+        )
+        val service = service(fake, deadlineMs = 20_000, minWaitMs = 10_000, quietMs = 10_000)
+        val started = System.currentTimeMillis()
+        val result = service.streams("movie", "tt0000043", Settings(rank = RankSettings(langs = listOf("en", "de"))))
+        assertEquals(listOf("https://english.example/stream"), result.streams.map { it.url })
+        assertTrue(System.currentTimeMillis() - started < 5_000)
     }
 }

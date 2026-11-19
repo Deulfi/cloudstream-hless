@@ -36,6 +36,7 @@ class ConfigValues(env: Map<String, String>) {
     val minWaitMs: Long
     val quietMs: Long
     val hint: Boolean
+    val emptyWaitMs: Long
 
     init {
         port = intVar(env, "HLESS_PORT", 7000)
@@ -70,6 +71,7 @@ class ConfigValues(env: Map<String, String>) {
         minWaitMs = longVar(env, "HLESS_MIN_WAIT_MS", 4_000)
         quietMs = longVar(env, "HLESS_QUIET_MS", 2_000)
         hint = boolVar(env, "HLESS_HINT", true)
+        emptyWaitMs = longVar(env, "HLESS_EMPTY_WAIT_MS", 10_000)
     }
 
     private fun boolVar(env: Map<String, String>, name: String, default: Boolean): Boolean {
@@ -150,4 +152,5 @@ object Config {
     val minWaitMs: Long get() = values.minWaitMs
     val quietMs: Long get() = values.quietMs
     val hint: Boolean get() = values.hint
+    val emptyWaitMs: Long get() = values.emptyWaitMs
 }

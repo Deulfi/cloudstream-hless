@@ -41,6 +41,8 @@ class StreamServiceImpl(
     private val kitsuLookup: TitleLookup = KitsuLookup(),
     private val prober: Prober = LinkProbe(),
     private val deadlineMs: Long = Config.deadlineMs,
+    /** After the deadline, how much longer to wait while there is nothing at all to show. */
+    private val emptyWaitMs: Long = Config.emptyWaitMs,
     private val minWaitMs: Long = Config.minWaitMs,
     private val quietMs: Long = Config.quietMs,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -174,7 +176,13 @@ class StreamServiceImpl(
     private fun order(providers: List<ProviderInfoDto>, rank: RankSettings): List<Pair<ProviderInfoDto, Usefulness>> {
         val page = rank.order.withIndex().associate { it.value.lowercase() to it.index }
         fun position(provider: ProviderInfoDto) = page[provider.name.lowercase()] ?: Int.MAX_VALUE
-        val classified = providers.map { it to (if (rank.smart) stats.classify(it.name) else Usefulness.UNKNOWN) }
+        val langs = rank.langs.map { it.lowercase() }.toSet()
+        val classified = providers.map { p ->
+            var u = if (rank.smart) stats.classify(p.name) else Usefulness.UNKNOWN
+            // A provider in a language the person did not pick goes last, unless it has delivered lately.
+            if (rank.smart && langs.isNotEmpty() && u != Usefulness.LIKELY && p.language.lowercase() !in langs) u = Usefulness.DORMANT
+            p to u
+        }
         return classified.sortedWith(
             compareBy<Pair<ProviderInfoDto, Usefulness>>(
                 { it.second.ordinal },
@@ -366,7 +374,10 @@ class StreamServiceImpl(
             if (relevant.all { it.finishedAt != 0L }) return false
             val now = clock()
             val elapsed = now - started
-            if (elapsed >= deadlineMs) return false
+            if (elapsed >= deadlineMs) {
+                // An empty answer helps nobody: keep waiting a while for the first link.
+                if (wanted.any { it.hasLinks } || elapsed >= deadlineMs + emptyWaitMs) return false
+            }
             val likelyWorking = relevant.any { it.usefulness == Usefulness.LIKELY && it.finishedAt == 0L }
             val working = relevant.any { it.matched && it.finishedAt == 0L }
             if (!likelyWorking && !working && elapsed >= minWaitMs && relevant.any { it.hasLinks } &&

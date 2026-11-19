@@ -4,7 +4,7 @@ A headless CloudStream extension host that serves as a Stremio addon ("Hless").
 It runs community `.cs3` extensions on a plain JVM in a container and answers
 Stremio's catalog, meta and stream requests from them: it searches the installed
 providers for the title, extracts the links, probes them, ranks them and returns
-the result. Meant for a small home server (about 200 MB of RAM).
+the result. Meant for a small home server (the container needs about 500 MB of RAM with 100 providers loaded; the image's heap limit is 384 MB).
 
 This is a "works for me" project with minimal maintenance. Issues may go
 unanswered; pull requests and forks are welcome.
@@ -59,6 +59,7 @@ configuration page overrides them per installed link.
 | `HLESS_ICONS` | `true` | Emoji icons in the rows. |
 | `HLESS_HINT` | `true` | Add a "still loading" / "hidden by filter" note row to partial answers. |
 | `HLESS_DEADLINE_MS` | `15000` | Longest wait before answering Stremio. |
+| `HLESS_EMPTY_WAIT_MS` | `10000` | When nothing at all is ready at the deadline, keep waiting this much longer for the first link. |
 | `HLESS_MIN_WAIT_MS` / `HLESS_QUIET_MS` | `4000` / `2000` | Earliest answer, and how long things must be quiet to answer early. |
 | `HLESS_TMDB_KEY` | none | TMDB API key, for titles in other languages (the search then also uses them). |
 | `HLESS_ANIME_AUDIO` | `sub` | Preferred audio variant for Kitsu (anime) ids. |
