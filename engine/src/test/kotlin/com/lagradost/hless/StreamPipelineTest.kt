@@ -100,6 +100,19 @@ class StreamPipelineTest {
     }
 
     @Test
+    fun `a person's own proxy is used instead of the server's, and none still means none`() {
+        val server: (StreamLinkDto) -> String? = { "https://server-mf.example/proxy" }
+        val own = Settings(ownProxy = OwnProxy("https://my-mf.example", "pw"))
+        val url = render(listOf(kellerkino), own, mediaflow = server).streams.single().url!!
+        assertEquals(true, url.startsWith("https://my-mf.example/proxy/"))
+        assertEquals(true, url.contains("api_password=pw"))
+        assertEquals(
+            listOf("https://dood.example/f.mp4"),
+            render(listOf(kellerkino), own.copy(proxy = false), mediaflow = server).streams.map { it.url },
+        )
+    }
+
+    @Test
     fun `settings of one request do not leak into another on the same results`() {
         val results = listOf(megakino, kellerkino)
         val strict = render(results, Settings(rank = RankSettings(minQuality = 1080)))

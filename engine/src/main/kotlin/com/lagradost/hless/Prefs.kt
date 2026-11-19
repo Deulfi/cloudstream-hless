@@ -3,13 +3,15 @@ package com.lagradost.hless
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.Base64
 
 /**
  * A person's preferences (6a), carried in the addon URL as
  * `c~<base64url(json)>`. Every field is optional: missing means "the
- * server's default". Never put a secret in here; the MediaFlow password and
- * the TMDB key are server settings.
+ * server's default". The TMDB key is a server setting and never goes in here. A person's own
+ * MediaFlow address and password ([mfUrl], [mfPw]) do, because the link is the person's
+ * own: anyone who has the link can use that proxy.
  */
 @Serializable
 data class Prefs(
@@ -18,6 +20,8 @@ data class Prefs(
     val maxH: Int? = null,
     /** Providers never asked. */
     val off: List<String>? = null,
+    /** Only these providers are asked (written instead of a long [off] list); [off] still applies. */
+    val only: List<String>? = null,
     /** Providers listed first, in this order. */
     val first: List<String>? = null,
     val sort: String? = null,
@@ -34,12 +38,17 @@ data class Prefs(
     /** Hosters switched off. */
     val hostOff: List<String>? = null,
     val hint: Boolean? = null,
+    /** The person's own MediaFlow proxy, used instead of the server's. */
+    val mfUrl: String? = null,
+    val mfPw: String? = null,
 )
 
 private val prefsJson = Json { ignoreUnknownKeys = true; isLenient = false; encodeDefaults = false; explicitNulls = false }
 
-private const val MAX_SEGMENT_CHARS = 4_000   // about 3 KiB once decoded
+private const val MAX_SEGMENT_CHARS = 8_000   // about 6 KiB once decoded
+private const val MAX_BYTES = 6_144
 private const val MAX_LIST = 60
+private const val MAX_PROVIDER_LIST = 200
 private const val MAX_NAME = 40
 
 /**
@@ -50,7 +59,7 @@ fun decodePrefs(segment: String?): Prefs? {
     if (segment.isNullOrEmpty() || segment.length > MAX_SEGMENT_CHARS) return null
     return try {
         val bytes = Base64.getUrlDecoder().decode(segment)
-        if (bytes.size > 3_072) null else prefsJson.decodeFromString(Prefs.serializer(), String(bytes, Charsets.UTF_8))
+        if (bytes.size > MAX_BYTES) null else prefsJson.decodeFromString(Prefs.serializer(), String(bytes, Charsets.UTF_8))
     } catch (e: Exception) {
         null
     }
@@ -76,7 +85,8 @@ fun Prefs?.resolve(defaults: Settings): Settings {
         minQuality = min,
         maxQuality = max,
         // The server's own deny list stays; a person can only add to it.
-        providersDeny = (rank.providersDeny + (names(off) ?: emptyList())).distinct(),
+        providersDeny = (rank.providersDeny + (names(off, MAX_PROVIDER_LIST) ?: emptyList())).distinct(),
+        providersAllow = narrow(rank.providersAllow, names(only, MAX_PROVIDER_LIST)),
         providersFirst = names(first) ?: rank.providersFirst,
         sort = SortMode.parse(sort) ?: rank.sort,
         maxPerProvider = perProv?.coerceIn(1, 20) ?: rank.maxPerProvider,
@@ -93,6 +103,23 @@ fun Prefs?.resolve(defaults: Settings): Settings {
         ),
         variants = Variants.parse(variants) ?: defaults.variants,
         proxy = proxy ?: defaults.proxy,
+        ownProxy = ownProxy(mfUrl, mfPw),
         hint = hint ?: defaults.hint,
     )
+}
+
+/** The server's allow list can only be narrowed: the person's list is cut down to what the server allows. */
+private fun narrow(server: List<String>, person: List<String>?): List<String> = when {
+    person.isNullOrEmpty() -> server
+    server.isEmpty() -> person
+    else -> server.filter { s -> person.any { it.equals(s, ignoreCase = true) } }.ifEmpty { server }
+}
+
+/** The person's own MediaFlow, when the address is a plain http(s) address and the password is usable; else null. */
+internal fun ownProxy(url: String?, password: String?): OwnProxy? {
+    val base = url?.trim()?.trimEnd('/')?.takeIf { it.length in 8..200 } ?: return null
+    val pw = password?.takeIf { it.isNotEmpty() && it.length <= 100 && it.none { c -> c.isISOControl() || c.isWhitespace() } } ?: return null
+    val parsed = base.toHttpUrlOrNull() ?: return null
+    if (parsed.username.isNotEmpty() || parsed.password.isNotEmpty() || parsed.query != null || parsed.fragment != null) return null
+    return OwnProxy(base, pw)
 }

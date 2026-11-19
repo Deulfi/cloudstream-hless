@@ -20,12 +20,17 @@ enum class Variants {
  * environment ([fromConfig]); a person's preferences (6a) are laid over them
  * per request.
  */
+/** A MediaFlow address (no trailing slash) and its password. */
+data class OwnProxy(val url: String, val password: String)
+
 data class Settings(
     val rank: RankSettings = RankSettings(),
     val display: DisplaySettings = DisplaySettings(),
     val variants: Variants = Variants.FOLD,
     /** Wrap links in MediaFlow when the server has one. */
     val proxy: Boolean = true,
+    /** The person's own MediaFlow, used instead of the server's when set. */
+    val ownProxy: OwnProxy? = null,
     /** Add a note to the list when results are still loading or were hidden by a filter. */
     val hint: Boolean = true,
 ) {

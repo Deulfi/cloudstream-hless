@@ -41,7 +41,11 @@ fun renderStreams(
         runtimeSec = runtimeSeconds(results, runtimeFallbackMinutes),
         display = settings.display,
         hostersOff = settings.rank.hostersOff.map { it.trim().lowercase() }.toSet(),
-        mediaflow = if (settings.proxy) mediaflow else { _ -> null },
+        mediaflow = when {
+            !settings.proxy -> { _ -> null }
+            settings.ownProxy != null -> { link -> MediaFlow.wrap(settings.ownProxy.url, settings.ownProxy.password, link) }
+            else -> mediaflow
+        },
     )
     val dropped = EnumMap<DropReason, Int>(DropReason::class.java)
     val candidates = ArrayList<Candidate>()

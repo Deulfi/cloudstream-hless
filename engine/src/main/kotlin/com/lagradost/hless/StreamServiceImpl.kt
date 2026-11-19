@@ -120,7 +120,8 @@ class StreamServiceImpl(
             RateLimitedLog.log("overload", "hless: too many providers running, new titles are refused for now", 60_000L)
             return StreamResult(emptyList(), false)
         }
-        if (settings.proxy && MediaFlow.configured()) MediaFlow.wake(scope)
+        // only the server's own MediaFlow is woken: never an address a person put in their link
+        if (settings.proxy && settings.ownProxy == null && MediaFlow.configured()) MediaFlow.wake(scope)
         val kitsu = parsedId.kitsu != null
         val effectiveType = if (type == "anime") {
             if (parsedId.episode != null) "series" else "movie"
@@ -202,7 +203,8 @@ class StreamServiceImpl(
      */
     private suspend fun hlessStreams(id: String, settings: Settings): StreamResult {
         val hless = HlessId.decode(id) ?: return StreamResult(emptyList(), true)
-        if (settings.proxy && MediaFlow.configured()) MediaFlow.wake(scope)
+        // only the server's own MediaFlow is woken: never an address a person put in their link
+        if (settings.proxy && settings.ownProxy == null && MediaFlow.configured()) MediaFlow.wake(scope)
         val provider = client.providers().firstOrNull { it.providerId == hless.providerId }
             ?: return StreamResult(emptyList(), true)
         if (!askProvider(provider.name, settings.rank)) return StreamResult(emptyList(), true)

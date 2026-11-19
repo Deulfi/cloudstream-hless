@@ -41,9 +41,9 @@ class PrefsTest {
         assertNull(decodePrefs(segment("""{"minH":"abc"}""")))
         assertNull(decodePrefs(segment("""{"langs":"de"}""")))
         assertNull(decodePrefs(segment("""[1,2,3]""")))
-        assertNull(decodePrefs("A".repeat(3_001)))
-        // Short as text, but more than 2 KiB once decoded.
-        assertNull(decodePrefs(segment("""{"off":["${"a".repeat(3_100)}"]}""")))
+        assertNull(decodePrefs("A".repeat(8_001)))
+        // Short as text, but more than 6 KiB once decoded.
+        assertNull(decodePrefs(segment("""{"off":["${"a".repeat(6_200)}"]}""")))
     }
 
     @Test
@@ -105,9 +105,9 @@ class PrefsTest {
 
     @Test
     fun `lists are bounded`() {
-        val many = (1..100).map { "p$it" }
+        val many = (1..300).map { "p$it" }
         val rank = Prefs(off = many, first = many).resolve(defaults).rank
-        assertEquals(1 + 60, rank.providersDeny.size)
+        assertEquals(1 + 200, rank.providersDeny.size)
         assertEquals(60, rank.providersFirst.size)
         assertEquals(40, Prefs(first = listOf("x".repeat(100))).resolve(defaults).rank.providersFirst.single().length)
     }
@@ -126,5 +126,40 @@ class PrefsTest {
         // not given: the server's values stay
         assertEquals(true, Prefs().resolve(defaults).rank.smart)
         assertEquals(true, Prefs().resolve(defaults).hint)
+    }
+
+    @Test
+    fun `a list of providers to keep replaces a long list of providers to drop`() {
+        val rank = Prefs(only = listOf("A", "B"), off = listOf("B")).resolve(defaults).rank
+        assertEquals(listOf("A", "B"), rank.providersAllow)
+        assertEquals(true, askProvider("A", rank))
+        assertEquals(false, askProvider("B", rank))      // off still applies
+        assertEquals(false, askProvider("C", rank))
+        // the server's own allow list can only be narrowed
+        val server = defaults.copy(rank = defaults.rank.copy(providersAllow = listOf("A", "Z")))
+        assertEquals(listOf("A"), Prefs(only = listOf("a", "Q")).resolve(server).rank.providersAllow)
+        assertEquals(listOf("A", "Z"), Prefs(only = listOf("Q")).resolve(server).rank.providersAllow)
+    }
+
+    @Test
+    fun `ninety providers with seventy off fit in the link either way round`() {
+        val all = (1..90).map { "Provider$it" }
+        val keep = all.take(20)
+        val link = encodePrefs(Prefs(only = keep, order = all, first = all.take(3)))
+        assertEquals(true, link.length < 3_000)
+        val back = decodePrefs(link)!!.resolve(defaults).rank
+        assertEquals(keep, back.providersAllow)
+    }
+
+    @Test
+    fun `a person's own proxy is read when the address is plain and the password usable`() {
+        val own = Prefs(mfUrl = " https://mf.example.org/ ", mfPw = "secret").resolve(defaults).ownProxy
+        assertEquals(OwnProxy("https://mf.example.org", "secret"), own)
+        for (bad in listOf("ftp://mf.example", "https://user:pw@mf.example", "https://mf.example/?x=1", "mf.example", "https://a b.example", "http://" + "a".repeat(300))) {
+            assertNull(Prefs(mfUrl = bad, mfPw = "secret").resolve(defaults).ownProxy, bad)
+        }
+        assertNull(Prefs(mfUrl = "https://mf.example.org", mfPw = "").resolve(defaults).ownProxy)
+        assertNull(Prefs(mfUrl = "https://mf.example.org", mfPw = "a b").resolve(defaults).ownProxy)
+        assertNull(Prefs(mfUrl = "https://mf.example.org").resolve(defaults).ownProxy)
     }
 }

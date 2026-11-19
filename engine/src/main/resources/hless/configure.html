@@ -29,7 +29,7 @@
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
   .row > label { min-width: 7.5rem; }
   label.check { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-  select, input[type=number], input[type=text] {
+  select, input[type=number], input[type=text], input[type=password] {
     background: var(--field); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;
     padding: 8px 10px; font: inherit; min-width: 0;
   }
@@ -80,6 +80,21 @@
     <h2>Providers</h2>
     <label class="check"><input type="checkbox" id="smart"> Order providers by how often they find something</label>
     <p class="hint">On: providers that usually find titles are searched first and waited for, the ones that never do run last; your order below only breaks ties. Off: they are searched exactly in the order shown. Use the checkbox to ask a provider at all, ☆ to list its streams first.</p>
+    <div class="row">
+      <input type="text" id="pf-text" placeholder="Filter by name" aria-label="Filter providers by name" size="16">
+      <select id="pf-lang" aria-label="Filter by language"></select>
+      <select id="pf-type" aria-label="Filter by type">
+        <option value="">All types</option>
+        <option value="movie">Movies</option>
+        <option value="series">Series and anime</option>
+        <option value="live">Live</option>
+      </select>
+    </div>
+    <div class="row">
+      <button type="button" id="pf-all">Select all shown</button>
+      <button type="button" id="pf-none">Deselect all shown</button>
+      <span class="tag" id="pf-count"></span>
+    </div>
     <ul class="list" id="providers"></ul>
   </section>
 
@@ -121,10 +136,15 @@
     <label class="check"><input type="checkbox" id="hint"> Add a note at the end when results are still loading or were hidden by a filter</label>
   </section>
 
-  <section id="proxy-section" hidden>
+  <section id="proxy-section">
     <h2>Proxy</h2>
-    <p class="hint">Send streams through the server's MediaFlow proxy. Most streams need it to play outside the desktop apps.</p>
-    <label class="check"><input type="checkbox" id="proxy"> Use MediaFlow</label>
+    <p class="hint">A MediaFlow proxy lets most streams play outside the desktop apps. Use the server's, your own, or none.</p>
+    <div class="row"><label for="mfMode">Use</label><select id="mfMode"></select></div>
+    <div id="mf-own" hidden>
+      <div class="row"><label for="mfUrl">Address</label><input type="text" id="mfUrl" placeholder="Address, starting with http or https" autocomplete="off" size="30"></div>
+      <div class="row"><label for="mfPw">Password</label><input type="password" id="mfPw" autocomplete="off" size="24"></div>
+      <p class="hint">The address and password become part of the addon link, so anyone who has the link can use your proxy. The server itself never calls this address.</p>
+    </div>
   </section>
 
   <section>
@@ -147,6 +167,7 @@
   var m = location.pathname.match(/^(.*?)(?:\/c~([A-Za-z0-9_-]+))?\/configure\/?$/);
   var base = m ? m[1] : '';
   var server = null, providers = [], hosters = [], st = null;
+  var pf = { text: '', lang: '', type: '' };
 
   function b64urlEncode(text) {
     var bytes = new TextEncoder().encode(text), s = '';
@@ -180,6 +201,15 @@
     var t = list[i]; list[i] = list[j]; list[j] = t;
   }
 
+  // The link holds either the providers that are off, or (when most are off) the ones that stay on.
+  function offFrom(saved, names) {
+    var off = (saved.off || []).slice();
+    if (saved.only && saved.only.length) {
+      names.forEach(function (n) { if (saved.only.indexOf(n) < 0 && off.indexOf(n) < 0) off.push(n); });
+    }
+    return off;
+  }
+
   function initState() {
     var d = server.defaults, saved = {};
     if (m && m[2]) { try { saved = b64urlDecode(m[2]) || {}; } catch (e) { saved = {}; } }
@@ -191,12 +221,14 @@
       minH: pick('minH'), maxH: pick('maxH'),
       order: savedOrder.concat(names.filter(function (n) { return savedOrder.indexOf(n) < 0; })),
       pinned: (pick('first') || []).slice(),
-      off: (saved.off || []).slice(),
+      off: offFrom(saved, names),
       hostOff: (pick('hostOff') || []).slice(),
       smart: pick('smart') !== false, hint: pick('hint') !== false,
       sort: pick('sort'), perProv: pick('perProv'), total: pick('total'),
-      variants: pick('variants'), flags: pick('flags'), icons: pick('icons'), proxy: pick('proxy')
+      variants: pick('variants'), flags: pick('flags'), icons: pick('icons'), proxy: pick('proxy'),
+      mfUrl: saved.mfUrl || '', mfPw: saved.mfPw || ''
     };
+    st.mfMode = saved.mfUrl && saved.mfPw ? 'own' : (!server.mediaflow || st.proxy === false ? 'none' : 'server');
   }
 
   function fillHeights(select, value) {
@@ -232,11 +264,56 @@
     return null;
   }
 
+  function typeGroups(p) {
+    var g = [];
+    (p.types || []).forEach(function (t) {
+      if (t === 'Movie' || t === 'AnimeMovie' || t === 'Documentary') { if (g.indexOf('movie') < 0) g.push('movie'); }
+      else if (t === 'Live') { if (g.indexOf('live') < 0) g.push('live'); }
+      else if (g.indexOf('series') < 0) g.push('series');
+    });
+    return g;
+  }
+  function visible(p) {
+    if (!p) return false;
+    if (pf.text && p.name.toLowerCase().indexOf(pf.text) < 0) return false;
+    if (pf.lang && p.language !== pf.lang) return false;
+    if (pf.type && typeGroups(p).indexOf(pf.type) < 0) return false;
+    return true;
+  }
+  function moveVisible(i, d) {
+    var j = i + d;
+    while (j >= 0 && j < st.order.length && !visible(byName(st.order[j]))) j += d;
+    if (j >= 0 && j < st.order.length) { var t = st.order[i]; st.order[i] = st.order[j]; st.order[j] = t; }
+  }
+  function shownNames() {
+    return st.order.filter(function (n) { return visible(byName(n)); });
+  }
+  function setShown(on) {
+    shownNames().forEach(function (n) {
+      var k = st.off.indexOf(n);
+      if (on && k >= 0) st.off.splice(k, 1);
+      if (!on && k < 0) st.off.push(n);
+    });
+    changed(); renderProviders();
+  }
+  function fillLangFilter() {
+    var counts = {};
+    providers.forEach(function (p) { counts[p.language] = (counts[p.language] || 0) + 1; });
+    var sel = $('pf-lang'); sel.textContent = '';
+    var all = document.createElement('option'); all.value = ''; all.textContent = 'All languages'; sel.appendChild(all);
+    Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).forEach(function (l) {
+      var o = document.createElement('option'); o.value = l; o.textContent = (l || '?') + ' (' + counts[l] + ')'; sel.appendChild(o);
+    });
+  }
+
   function renderProviders() {
     var ul = $('providers'); ul.textContent = '';
+    var shown = 0, enabled = 0;
+    providers.forEach(function (p) { if (st.off.indexOf(p.name) < 0) enabled++; });
     st.order.forEach(function (name, i) {
       var p = byName(name);
-      if (!p) return;
+      if (!visible(p)) return;
+      shown++;
       var li = document.createElement('li');
       var on = st.off.indexOf(name) < 0;
       var dormant = p.usefulness === 'dormant';
@@ -260,8 +337,8 @@
         stat.title = 'Found the title ' + p.hits + ' times in ' + p.tries + ' searches' + (dormant ? '; searched last' : '');
         li.appendChild(stat);
       }
-      li.appendChild(button('▲', 'Move up', function () { move(st.order, i, -1); changed(); renderProviders(); }));
-      li.appendChild(button('▼', 'Move down', function () { move(st.order, i, 1); changed(); renderProviders(); }));
+      li.appendChild(button('▲', 'Move up', function () { moveVisible(i, -1); changed(); renderProviders(); }));
+      li.appendChild(button('▼', 'Move down', function () { moveVisible(i, 1); changed(); renderProviders(); }));
       var pinned = st.pinned.indexOf(name) >= 0;
       li.appendChild(button(pinned ? '★' : '☆', pinned ? 'Unpin' : 'List its streams first', function () {
         var k = st.pinned.indexOf(name);
@@ -270,6 +347,7 @@
       }));
       ul.appendChild(li);
     });
+    $('pf-count').textContent = shown + ' of ' + providers.length + ' shown · ' + enabled + ' on';
   }
 
   function renderHosters() {
@@ -311,7 +389,11 @@
     if (st.minH !== d.minH) out.minH = st.minH;
     if (st.maxH !== d.maxH) out.maxH = st.maxH;
     var off = st.off.filter(function (n) { return names.indexOf(n) >= 0; });
-    if (off.length) out.off = off;
+    var keep = names.filter(function (n) { return off.indexOf(n) < 0; });
+    if (off.length) {
+      // the shorter list goes in the link
+      if (keep.length && off.length > keep.length) out.only = keep; else out.off = off;
+    }
     if (!same(st.order, names)) out.order = st.order;
     var first = st.order.filter(function (n) { return st.pinned.indexOf(n) >= 0; });
     if (!same(first, d.first)) out.first = first;
@@ -319,7 +401,11 @@
     if (st.hint !== d.hint) out.hint = st.hint;
     if (!same(st.hostOff, d.hostOff)) out.hostOff = st.hostOff;
     ['sort', 'perProv', 'total', 'variants', 'flags', 'icons'].forEach(function (k) { if (st[k] !== d[k]) out[k] = st[k]; });
-    if (server.mediaflow && st.proxy !== d.proxy) out.proxy = st.proxy;
+    if (st.mfMode === 'none') { if (server.mediaflow) out.proxy = false; }
+    else if (st.mfMode === 'own') {
+      if (st.mfUrl.trim() && st.mfPw) { out.mfUrl = st.mfUrl.trim(); out.mfPw = st.mfPw; }
+      if (d.proxy === false) out.proxy = true;
+    } else if (d.proxy === false) out.proxy = true;
     return out;
   }
 
@@ -350,11 +436,22 @@
       $(k).checked = !!st[k];
       $(k).addEventListener('change', function () { st[k] = this.checked; changed(); });
     });
-    if (server.mediaflow) {
-      $('proxy-section').hidden = false;
-      $('proxy').checked = !!st.proxy;
-      $('proxy').addEventListener('change', function () { st.proxy = this.checked; changed(); });
-    }
+    var mode = $('mfMode');
+    if (server.mediaflow) { var o1 = document.createElement('option'); o1.value = 'server'; o1.textContent = "The server's MediaFlow"; mode.appendChild(o1); }
+    var o2 = document.createElement('option'); o2.value = 'own'; o2.textContent = 'My own MediaFlow'; mode.appendChild(o2);
+    var o3 = document.createElement('option'); o3.value = 'none'; o3.textContent = 'No proxy'; mode.appendChild(o3);
+    mode.value = st.mfMode;
+    function showOwn() { $('mf-own').hidden = st.mfMode !== 'own'; }
+    showOwn();
+    mode.addEventListener('change', function () { st.mfMode = this.value; showOwn(); changed(); });
+    $('mfUrl').value = st.mfUrl; $('mfPw').value = st.mfPw;
+    $('mfUrl').addEventListener('input', function () { st.mfUrl = this.value; changed(); });
+    $('mfPw').addEventListener('input', function () { st.mfPw = this.value; changed(); });
+    $('pf-text').addEventListener('input', function () { pf.text = this.value.trim().toLowerCase(); renderProviders(); });
+    $('pf-lang').addEventListener('change', function () { pf.lang = this.value; renderProviders(); });
+    $('pf-type').addEventListener('change', function () { pf.type = this.value; renderProviders(); });
+    $('pf-all').addEventListener('click', function () { setShown(true); });
+    $('pf-none').addEventListener('click', function () { setShown(false); });
     $('lang-add').addEventListener('click', function () {
       var v = $('lang-new').value.trim().toLowerCase();
       if (/^[a-z]{2,3}$/.test(v) && st.langs.indexOf(v) < 0) { st.langs.push(v); $('lang-new').value = ''; changed(); renderLangs(); }
@@ -376,7 +473,7 @@
 
   Promise.all([get('/api/server'), get('/api/providers'), get('/api/hosters')]).then(function (res) {
     server = res[0]; providers = res[1]; hosters = res[2];
-    initState(); bind(); renderLangs(); renderProviders(); renderHosters(); changed();
+    initState(); fillLangFilter(); bind(); renderLangs(); renderProviders(); renderHosters(); changed();
     $('notice').textContent = providers.length ? '' : 'The server has no providers installed yet.';
   }).catch(function (e) {
     $('notice').textContent = 'Could not load the server settings (' + e.message + ').';

@@ -51,7 +51,7 @@ interface StreamService {
 /** Server facts the configuration page needs; never a secret. */
 class ServerInfo(val mediaflow: Boolean = false, val publicUrl: String? = null)
 
-const val ADDON_VERSION: String = "0.3.0"
+const val ADDON_VERSION: String = "0.3.1"
 
 /**
  * The Stremio addon: manifest, stream/catalog/meta endpoints, the
