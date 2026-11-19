@@ -4,7 +4,7 @@ A headless CloudStream extension host that serves as a Stremio addon ("Hless").
 It runs community `.cs3` extensions on a plain JVM in a container and answers
 Stremio's catalog, meta and stream requests from them: it searches the installed
 providers for the title, extracts the links, probes them, ranks them and returns
-the result. Meant for a small home server (the container needs about 500 MB of RAM with 100 providers loaded; the image's heap limit is 384 MB).
+the result. Meant for a small home server (the container needs about 500 MB of RAM with 100 providers loaded; the heap is sized to 60 % of the container's memory at start, so give it more RAM for more providers).
 
 This is a "works for me" project with minimal maintenance. Issues may go
 unanswered; pull requests and forks are welcome.
@@ -49,6 +49,7 @@ configuration page overrides them per installed link.
 | `HLESS_PUBLIC_URL` | from request headers | Public base address, used in the manifest and for the icon. |
 | `HLESS_LANGS` | `en` | Preferred audio languages, e.g. `de,en`; others are sorted last. |
 | `HLESS_MIN_QUALITY` / `HLESS_MAX_QUALITY` | `0` / `0` | Resolution range in pixels of height; `0` is no limit. Unknown resolutions are never hidden. |
+| `HLESS_HEAP_MB` / `HLESS_HEAP_PERCENT` | auto / `60` | JVM heap: a fixed size in MB, or the share of the container's memory (read from `/proc/meminfo`, at least 192 MB). Used by the image's launcher. |
 | `HLESS_MAX_PER_PROVIDER` | `6` | Streams kept per provider. |
 | `HLESS_MAX_STREAMS` | `40` | Streams kept in total. |
 | `HLESS_PROVIDERS_ALLOW` / `_DENY` / `_FIRST` | none | Providers to use only / never / list first (names). |
