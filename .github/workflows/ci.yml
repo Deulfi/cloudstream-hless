@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 concurrency:
@@ -80,11 +81,12 @@ jobs:
             sleep 1
           done
           docker logs smoke; exit 1
+      # Only a version tag (v1.2.3) publishes the image; pushes to main just build and test it.
       - name: Push to GHCR
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker tag hless:ci "$IMAGE:latest"
-          docker tag hless:ci "$IMAGE:${GITHUB_SHA::12}"
+          docker tag hless:ci "$IMAGE:${GITHUB_REF_NAME#v}"
           docker push "$IMAGE:latest"
-          docker push "$IMAGE:${GITHUB_SHA::12}"
+          docker push "$IMAGE:${GITHUB_REF_NAME#v}"
