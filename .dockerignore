@@ -1,2 +1,3 @@
 *
 !engine/build/libs/daemon.jar
+!scripts/hless-entrypoint.sh
