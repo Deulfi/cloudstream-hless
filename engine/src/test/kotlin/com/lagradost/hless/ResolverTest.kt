@@ -96,5 +96,14 @@ class ResolverTest {
         assertNull(resolveData(client, "p", "series", StremioId("tt2", null, 1, 9), fallout, 5_000, cache))
         assertEquals(MatchCache.Entry.Absent, cache.lookup("tt2", "p"))
     }
-}
 
+    @Test
+    fun `a percent sign in the title does not break the episode search`() = runBlocking {
+        // A site that lists episodes one by one (but not this one) makes the resolver search "<name> S01E09".
+        val results = listOf(SearchResultDto(name = "100% Wolf S01E01", url = "https://p/e1", provider = "p", type = "Movie"))
+        val client = SearchClient(results)
+        val wolf = TitleInfo(listOf("100% Wolf"), 2020)
+        assertNull(resolveData(client, "p", "series", StremioId("tt3", null, 1, 9), wolf, 5_000, cache()))
+        assertEquals(2, client.searches.get())
+    }
+}

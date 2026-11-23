@@ -80,7 +80,8 @@ suspend fun resolveData(
             if (match == null && perEntry && sawEpisodes) {
                 // The site lists episodes one by one and the list was cut short: ask for this one.
                 val results = client.search(
-                    providerId, "${info.names.first()} S%02dE%02d".format(season, episode), timeoutMs,
+                    // The name is not part of the format string: a "%" in a title would break it.
+                    providerId, info.names.first() + String.format(java.util.Locale.ROOT, " S%02dE%02d", season, episode), timeoutMs,
                 )
                 pickSeriesEntry(info, results, season!!, episode!!)?.let {
                     match = it.result
