@@ -48,10 +48,14 @@ interface StreamService {
     suspend fun streams(type: String, id: String, settings: Settings): StreamResult
 }
 
-/** Server facts the configuration page needs; never a secret. */
-class ServerInfo(val mediaflow: Boolean = false, val publicUrl: String? = null)
+/**
+ * Server facts the configuration page needs; never a secret. [shared]: several
+ * people use this server, so what one of them searched for (how often a provider
+ * found something, which hosters were seen how often) is not shown to the others.
+ */
+class ServerInfo(val mediaflow: Boolean = false, val publicUrl: String? = null, val shared: Boolean = false)
 
-const val ADDON_VERSION: String = "0.3.1"
+const val ADDON_VERSION: String = "0.3.2"
 
 /**
  * The Stremio addon: manifest, stream/catalog/meta endpoints, the
@@ -127,6 +131,7 @@ fun Application.addonModule(
                         put("name", provider.name)
                         put("language", provider.language)
                         put("types", JsonArray(provider.tvTypes.map { JsonPrimitive(it) }))
+                        if (server.shared) return@buildJsonObject
                         val counts = stats.counts(provider.name)
                         put("hits", counts.hits)
                         put("tries", counts.tries)
@@ -136,14 +141,21 @@ fun Application.addonModule(
                 call.respondText(array.toString(), ContentType.Application.Json)
             }
             get("/api/hosters") {
-                // Hoster names and how often they were seen; nothing else.
+                // Hoster names and how often they were seen; nothing else. Shared: names only, alphabetical.
                 call.response.headers.append(HttpHeaders.CacheControl, "max-age=60")
-                val array = JsonArray(stats.hosters().map { (name, seen) ->
-                    buildJsonObject {
-                        put("name", name)
-                        put("seen", seen)
-                    }
-                })
+                val hosters = stats.hosters()
+                val array = JsonArray(
+                    if (server.shared) {
+                        hosters.map { it.first }.sortedBy { it.lowercase() }.map { name -> buildJsonObject { put("name", name) } }
+                    } else {
+                        hosters.map { (name, seen) ->
+                            buildJsonObject {
+                                put("name", name)
+                                put("seen", seen)
+                            }
+                        }
+                    },
+                )
                 call.respondText(array.toString(), ContentType.Application.Json)
             }
             get("/api/server") {
@@ -399,7 +411,7 @@ fun startAddonServer(service: StreamService, client: EngineClient) {
         addonModule(
             service, client, Config.secret,
             defaults = Settings.fromConfig(),
-            server = ServerInfo(mediaflow = MediaFlow.configured(), publicUrl = Config.publicUrl),
+            server = ServerInfo(mediaflow = MediaFlow.configured(), publicUrl = Config.publicUrl, shared = Config.shared),
             healthy = {
                 runCatching { client.health().extensions.phase in setOf("ready", "safe_mode") }.getOrDefault(false)
             },

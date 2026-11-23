@@ -11,20 +11,80 @@ unanswered; pull requests and forks are welcome.
 
 ## Run
 
+### With Docker
+
 CI builds the image from the [Dockerfile](Dockerfile). Mount `/data` (extensions,
 caches, state) and set at least `HLESS_REPOS`:
 
 ```bash
-docker run -d --name hless -p 7000:7000 -v hless-data:/data \
+docker run -d --name hless --restart unless-stopped -p 7000:7000 -v hless-data:/data \
   -e HLESS_REPOS=https://example.org/repo.json \
   -e HLESS_PUBLIC_URL=https://hless.example.org \
   -e HLESS_SECRET=some-long-random-string \
   -e HLESS_LANGS=de,en \
-  ghcr.io/<owner>/cloudstream-hless
+  ghcr.io/deulfi/claudstream-hless:latest
 ```
 
-Without Docker: `./gradlew :engine:jar`, then run it as in the Dockerfile
-(`java --add-modules=jdk.incubator.foreign ... -Dcs.cloudstream.home=<dir> -cp daemon.jar com.lagradost.hless.HlessMainKt`). Needs JDK 17.
+### Without Docker (Debian 12)
+
+Builds the jar from source and runs it as a systemd service under its own user.
+It needs JDK **17** exactly: the engine uses `jdk.incubator.foreign`, which newer
+JDKs no longer have (Debian 13 only ships 21 and later; install Temurin 17 there
+instead). The first build downloads Gradle and the dependencies and takes a few minutes.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git openjdk-17-jdk-headless
+
+# build
+git clone --depth 1 https://github.com/Deulfi/claudstream-hless.git ~/hless-src
+cd ~/hless-src
+./gradlew :engine:jar
+
+# install
+sudo useradd --system --home-dir /var/lib/hless --create-home hless
+sudo install -d /opt/hless
+sudo install -m 644 engine/build/libs/daemon.jar /opt/hless/daemon.jar
+sudo install -m 755 scripts/hless-entrypoint.sh /opt/hless/hless-entrypoint.sh
+
+# settings: edit this file later, then `sudo systemctl restart hless`
+sudo tee /etc/hless.env >/dev/null <<'ENV'
+HLESS_DATA=/var/lib/hless
+HLESS_JAR=/opt/hless/daemon.jar
+# On a bare machine the launcher would take 60 % of all RAM; set the heap yourself.
+HLESS_HEAP_MB=768
+HLESS_REPOS=https://example.org/repo.json
+HLESS_LANGS=en
+#HLESS_SECRET=some-long-random-string
+#HLESS_PUBLIC_URL=https://hless.example.org
+ENV
+sudo chgrp hless /etc/hless.env && sudo chmod 640 /etc/hless.env
+
+sudo tee /etc/systemd/system/hless.service >/dev/null <<'UNIT'
+[Unit]
+Description=Hless Stremio addon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hless
+EnvironmentFile=/etc/hless.env
+ExecStart=/bin/sh /opt/hless/hless-entrypoint.sh com.lagradost.hless.HlessMainKt
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now hless
+journalctl -u hless -f   # wait for "engine ready", then open http://<host>:7000/
+```
+
+To update: `cd ~/hless-src && git pull && ./gradlew :engine:jar`, copy the jar
+again as above, then `sudo systemctl restart hless`.
+
+### Configure
 
 Open `http://<host>:7000/` (with `/<secret>/` in front when a secret is set). That
 is the configuration page: it shows the addon link to install in Stremio, and lets
@@ -69,6 +129,24 @@ configuration page overrides them per installed link.
 | `HLESS_SOLVER_TIMEOUT_MS` | `60000` | How long one solve may take. |
 | `HLESS_SOLVER_COOLDOWN_MS` | `600000` | Pause for a site the solver could not pass. |
 | `HLESS_SOLVER_CONCURRENCY` | `0` | Parallel solves (`0` is the solver's own limit). |
+| `HLESS_SHARED` | `false` | Several people use the server: the configuration page then shows no search statistics. See below. |
+
+## Hosting for several people
+
+Hless was written for one household, but every preference lives in the person's
+own addon link, not on the server. For a server that others use too:
+
+- Set `HLESS_SHARED=true`. Otherwise the configuration page shows everyone how
+  often each provider found something and how often each hoster came up, which
+  says something about what the others watched.
+- Set `HLESS_SECRET` and hand out the link with it. Anyone with the link can use
+  the server and make it search every provider.
+- The server's MediaFlow password is part of every proxied stream URL, so every
+  user can see it. People can enter their own MediaFlow on the configuration page instead.
+- Shared on purpose: title matches and provider statistics (one person's search
+  makes the next one's faster), and a limit of 150 provider searches running at
+  once, for everybody together. There is no per-person rate limit.
+- Memory grows with the providers, not the people: the work per title is shared.
 
 ## How it works, briefly
 

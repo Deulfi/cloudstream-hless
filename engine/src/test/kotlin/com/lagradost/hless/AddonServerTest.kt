@@ -546,4 +546,22 @@ class AddonServerTest {
             assertEquals("likely", a["usefulness"]!!.jsonPrimitive.content)
         }
     }
+
+    @Test
+    fun `a shared server keeps what others searched for to itself`() {
+        val store = JsonFileStore(java.io.File(kotlin.io.path.createTempDirectory("hless-shared").toString(), "s.json"), background = false)
+        val stats = ProviderStats(store)
+        stats.record("A", SearchOutcome.HIT)
+        stats.noteHoster("Voe"); stats.noteHoster("Voe"); stats.noteHoster("DoodStream")
+        val engine = FakeClient(providers = listOf(ProviderInfoDto(name = "A", providerId = "a", mainUrl = "https://a", language = "de", tvTypes = listOf("Movie"))))
+        testApplication {
+            application { addonModule(RecordingService(), engine, null, server = ServerInfo(shared = true), stats = stats) }
+            val a = Json.parseToJsonElement(client.get("/api/providers").body<String>()).jsonArray.single().jsonObject
+            assertEquals(setOf("name", "language", "types"), a.keys)
+            val hosters = Json.parseToJsonElement(client.get("/api/hosters").body<String>()).jsonArray.map { it.jsonObject }
+            // names only, alphabetical: neither counts nor an order that gives the counts away
+            assertEquals(listOf("DoodStream", "Voe"), hosters.map { it["name"]!!.jsonPrimitive.content })
+            assertEquals(setOf("name"), hosters.first().keys)
+        }
+    }
 }
