@@ -52,6 +52,8 @@ class StreamServiceImpl(
     private val gateHoldMs: Long = 8_000L,
     /** Which page of which provider belongs to a title; one per process, tests bring their own. */
     private val matches: MatchCache = MatchCache(HlessStores.matchStore),
+    /** Seals the server's MediaFlow URLs so no player sees the password; null when off. */
+    private val sealer: MediaFlowSealer? = MediaFlowSealer.fromConfig(),
 ) : StreamService {
 
     /** One provider's work for one title. */
@@ -162,7 +164,7 @@ class StreamServiceImpl(
         )
         if (prefetch && settings.rank.smart) prefetchNext(effectiveType, parsedId, info, wanted)
         return StreamResult(
-            rendered.streams, complete, loading,
+            sealed(rendered.streams, settings), complete, loading,
             hiddenQuality = (rendered.dropped[DropReason.BELOW_MIN_QUALITY] ?: 0) + (rendered.dropped[DropReason.ABOVE_MAX_QUALITY] ?: 0),
             hiddenHoster = rendered.dropped[DropReason.HOSTER_OFF] ?: 0,
         )
@@ -222,7 +224,14 @@ class StreamServiceImpl(
         val rendered = renderStreams(
             listOf(ProviderResult(ref, items, response.subtitles)), title, null, settings, StreamMapper.defaultMediaflow,
         )
-        return StreamResult(rendered.streams, true)
+        return StreamResult(sealed(rendered.streams, settings), true)
+    }
+
+    /** The streams with the server's MediaFlow URLs sealed (a person's own MediaFlow is left alone). */
+    private suspend fun sealed(streams: List<StremioStream>, settings: Settings): List<StremioStream> {
+        val s = sealer ?: return streams
+        if (!settings.proxy || settings.ownProxy != null) return streams
+        return s.sealAll(streams)
     }
 
     /**

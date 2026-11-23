@@ -38,6 +38,8 @@ class ConfigValues(env: Map<String, String>) {
     val hint: Boolean
     val emptyWaitMs: Long
     val shared: Boolean
+    val mediaflowEncrypt: Boolean
+    val rateLimit: Int
 
     init {
         port = intVar(env, "HLESS_PORT", 7000)
@@ -74,6 +76,9 @@ class ConfigValues(env: Map<String, String>) {
         hint = boolVar(env, "HLESS_HINT", true)
         emptyWaitMs = longVar(env, "HLESS_EMPTY_WAIT_MS", 10_000)
         shared = boolVar(env, "HLESS_SHARED", false)
+        mediaflowEncrypt = boolVar(env, "HLESS_MEDIAFLOW_ENCRYPT", true)
+        // Stream requests per minute per address; 0 = no limit. A shared server gets one by default.
+        rateLimit = intVar(env, "HLESS_RATE_LIMIT", if (shared) 30 else 0).coerceAtLeast(0)
     }
 
     private fun boolVar(env: Map<String, String>, name: String, default: Boolean): Boolean {
@@ -156,4 +161,6 @@ object Config {
     val hint: Boolean get() = values.hint
     val emptyWaitMs: Long get() = values.emptyWaitMs
     val shared: Boolean get() = values.shared
+    val mediaflowEncrypt: Boolean get() = values.mediaflowEncrypt
+    val rateLimit: Int get() = values.rateLimit
 }

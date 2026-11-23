@@ -55,7 +55,7 @@ interface StreamService {
  */
 class ServerInfo(val mediaflow: Boolean = false, val publicUrl: String? = null, val shared: Boolean = false)
 
-const val ADDON_VERSION: String = "0.3.2"
+const val ADDON_VERSION: String = "0.3.3"
 
 /**
  * The Stremio addon: manifest, stream/catalog/meta endpoints, the
@@ -73,6 +73,8 @@ fun Application.addonModule(
     server: ServerInfo = ServerInfo(),
     healthy: suspend () -> Boolean = { true },
     stats: ProviderStats = ProviderStats(),
+    /** Stream requests per minute per client address (catalog and meta: ten times that); 0 = no limit. */
+    rateLimit: Int = 0,
 ) {
     install(ContentNegotiation) { json(addonJson) }
     intercept(ApplicationCallPipeline.Plugins) {
@@ -81,6 +83,9 @@ fun Application.addonModule(
         proceed()
     }
     val providers = ProviderCache(client)
+    val streamLimit = RateLimiter(rateLimit)
+    // Opening the board asks every catalog at once, so browsing gets more room.
+    val browseLimit = RateLimiter(rateLimit * 10)
     val prefix = secret?.trim()?.takeIf { it.isNotEmpty() }?.let { "/$it" }.orEmpty()
     routing {
         // Stremio sends a bare OPTIONS probe before each GET; answer 204 to all.
@@ -106,19 +111,25 @@ fun Application.addonModule(
                 call.respond(manifest(providers.get().filter { askProvider(it.name, settings.rank) }, call.origin(server.publicUrl) + "/logo.png"))
             }
             get("/stream/{type}/{id}.json") {
+                val settings = call.settings(defaults)
                 val configureUrl = call.origin(server.publicUrl) + prefix + call.cfgSegment() + "/configure"
-                call.streamRoute(service, call.settings(defaults), configureUrl)
+                if (!streamLimit.allow(call.clientAddress())) return@get call.tooMany(settings.display.label, configureUrl)
+                call.streamRoute(service, settings, configureUrl)
             }
             get("/catalog/{type}/{id}.json") {
+                if (!browseLimit.allow(call.clientAddress())) return@get call.tooMany()
                 call.catalogRoute(client, type = call.parameters["type"], id = call.parameters["id"])
             }
             get("/catalog/{type}/{id}/search={q}.json") {
+                if (!browseLimit.allow(call.clientAddress())) return@get call.tooMany()
                 call.catalogRoute(client, type = call.parameters["type"], id = call.parameters["id"], query = call.parameters["q"])
             }
             get("/catalog/{type}/{id}/skip={n}.json") {
+                if (!browseLimit.allow(call.clientAddress())) return@get call.tooMany()
                 call.catalogRoute(client, type = call.parameters["type"], id = call.parameters["id"], skip = call.parameters["n"]?.toIntOrNull())
             }
             get("/meta/{type}/{id}.json") {
+                if (!browseLimit.allow(call.clientAddress())) return@get call.tooMany()
                 call.metaRoute(client, type = call.parameters["type"], id = call.parameters["id"])
             }
             get("/configure") { call.configureRoute() }
@@ -169,6 +180,26 @@ fun Application.addonModule(
         }
         if (prefix.isEmpty()) mountAll() else route(prefix) { mountAll() }
     }
+}
+
+private fun ApplicationCall.clientAddress(): String =
+    clientAddress(request.local.remoteAddress, request.headers["X-Forwarded-For"])
+
+/**
+ * Over the limit. A stream list gets a row that says so (Stremio shows an error
+ * page for a failed request, which says nothing); the rest get 429.
+ */
+private suspend fun ApplicationCall.tooMany(label: String? = null, configureUrl: String? = null) {
+    response.headers.append(HttpHeaders.CacheControl, "no-store")
+    response.headers.append(HttpHeaders.RetryAfter, "60")
+    if (label == null) return respond(HttpStatusCode.TooManyRequests)
+    respond(StreamsResponse(listOf(
+        StremioStream(
+            name = "$label\n⏸ busy",
+            description = "Too many requests from your address.\nWait a minute and open the title again.",
+            externalUrl = configureUrl,
+        ),
+    )))
 }
 
 private fun ApplicationCall.settings(defaults: Settings): Settings = decodePrefs(parameters["cfg"]).resolve(defaults)
@@ -412,6 +443,7 @@ fun startAddonServer(service: StreamService, client: EngineClient) {
             service, client, Config.secret,
             defaults = Settings.fromConfig(),
             server = ServerInfo(mediaflow = MediaFlow.configured(), publicUrl = Config.publicUrl, shared = Config.shared),
+            rateLimit = Config.rateLimit,
             healthy = {
                 runCatching { client.health().extensions.phase in setOf("ready", "safe_mode") }.getOrDefault(false)
             },

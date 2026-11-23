@@ -564,4 +564,22 @@ class AddonServerTest {
             assertEquals(setOf("name"), hosters.first().keys)
         }
     }
+
+    @Test
+    fun `over the rate limit a stream list says so and the service is not asked`() {
+        val service = RecordingService()
+        testApplication {
+            application { addonModule(service, FakeClient(), null, rateLimit = 2) }
+            repeat(2) { client.get("/stream/movie/tt0111161.json") }
+            val third = client.get("/stream/movie/tt0111161.json")
+            assertEquals(HttpStatusCode.OK, third.status)
+            assertEquals("no-store", third.headers[HttpHeaders.CacheControl])
+            val row = Json.parseToJsonElement(third.body<String>()).jsonObject["streams"]!!.jsonArray.single().jsonObject
+            assertEquals(true, row["description"]!!.jsonPrimitive.content.startsWith("Too many requests"))
+            assertEquals(2, service.calls.size)
+            // browsing has ten times the room
+            repeat(20) { assertEquals(HttpStatusCode.BadRequest, client.get("/catalog/other/x.json").status) }
+            assertEquals(HttpStatusCode.TooManyRequests, client.get("/catalog/other/x.json").status)
+        }
+    }
 }

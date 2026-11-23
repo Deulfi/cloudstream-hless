@@ -22,7 +22,7 @@ docker run -d --name hless --restart unless-stopped -p 7000:7000 -v hless-data:/
   -e HLESS_PUBLIC_URL=https://hless.example.org \
   -e HLESS_SECRET=some-long-random-string \
   -e HLESS_LANGS=de,en \
-  ghcr.io/deulfi/claudstream-hless:latest
+  ghcr.io/deulfi/cloudstream-hless:latest
 ```
 
 ### Without Docker (Debian 12)
@@ -37,7 +37,7 @@ sudo apt-get update
 sudo apt-get install -y git openjdk-17-jdk-headless
 
 # build
-git clone --depth 1 https://github.com/Deulfi/claudstream-hless.git ~/hless-src
+git clone --depth 1 https://github.com/Deulfi/cloudstream-hless.git ~/hless-src
 cd ~/hless-src
 ./gradlew :engine:jar
 
@@ -129,7 +129,9 @@ configuration page overrides them per installed link.
 | `HLESS_SOLVER_TIMEOUT_MS` | `60000` | How long one solve may take. |
 | `HLESS_SOLVER_COOLDOWN_MS` | `600000` | Pause for a site the solver could not pass. |
 | `HLESS_SOLVER_CONCURRENCY` | `0` | Parallel solves (`0` is the solver's own limit). |
+| `HLESS_MEDIAFLOW_ENCRYPT` | `true` | Hand out MediaFlow's encrypted, expiring URLs (`/generate_url`, valid 12 h) instead of ones with the password in them. |
 | `HLESS_SHARED` | `false` | Several people use the server: the configuration page then shows no search statistics. See below. |
+| `HLESS_RATE_LIMIT` | `0`, shared: `30` | Stream requests per minute per address (catalogs and meta: ten times that); `0` is no limit. Behind a reverse proxy the address it adds to `X-Forwarded-For` counts. |
 
 ## Hosting for several people
 
@@ -141,11 +143,16 @@ own addon link, not on the server. For a server that others use too:
   says something about what the others watched.
 - Set `HLESS_SECRET` and hand out the link with it. Anyone with the link can use
   the server and make it search every provider.
-- The server's MediaFlow password is part of every proxied stream URL, so every
-  user can see it. People can enter their own MediaFlow on the configuration page instead.
+- Stream URLs through the server's MediaFlow are encrypted, so users never see
+  its password. If MediaFlow cannot make one, a shared server hands the stream
+  out without the proxy rather than with the password. Users still stream through
+  your MediaFlow, with your bandwidth; leave `HLESS_MEDIAFLOW_URL` unset if that
+  is not what you want. People can enter their own MediaFlow on the configuration page.
+- Each address gets 30 stream requests a minute (`HLESS_RATE_LIMIT`); over that,
+  the list shows a "busy" row.
 - Shared on purpose: title matches and provider statistics (one person's search
   makes the next one's faster), and a limit of 150 provider searches running at
-  once, for everybody together. There is no per-person rate limit.
+  once, for everybody together.
 - Memory grows with the providers, not the people: the work per title is shared.
 
 ## How it works, briefly
