@@ -64,7 +64,7 @@ configuration page overrides them per installed link.
 | `HLESS_MIN_WAIT_MS` / `HLESS_QUIET_MS` | `4000` / `2000` | Earliest answer, and how long things must be quiet to answer early. |
 | `HLESS_TMDB_KEY` | none | TMDB API key, for titles in other languages (the search then also uses them). |
 | `HLESS_ANIME_AUDIO` | `sub` | Preferred audio variant for Kitsu (anime) ids. |
-| `HLESS_MEDIAFLOW_URL` / `HLESS_MEDIAFLOW_PASSWORD` | none | A [MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy); lets streams that need request headers play in more players. |
+| `HLESS_MEDIAFLOW_URL` / `HLESS_MEDIAFLOW_PASSWORD` | none | A [MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy); lets streams that need request headers play in more players. The URL goes into every stream link, so it must be the address the **player** reaches (e.g. the reverse-proxy name over https), not an internal container IP. |
 | `HLESS_SOLVER_URL` | none | A FlareSolverr-compatible service, for sites behind a Cloudflare challenge. Use its IP address if the container's resolver does not know its name. |
 | `HLESS_SOLVER_TIMEOUT_MS` | `60000` | How long one solve may take. |
 | `HLESS_SOLVER_COOLDOWN_MS` | `600000` | Pause for a site the solver could not pass. |
